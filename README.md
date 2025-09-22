@@ -3,7 +3,7 @@ from the hugging face repo. works with most versions of kokoro with the model.on
 
 ### this is not a great/good implementation or "proper" this is a "make it up as you go wip custom implementation"<br/>
 
-#### [simpletranscribe-rs](https://crates.io/crates/simple_transcribe_rs) automatically downloads a whisper model defined by tiny,base, small, medium, large in /models<br/> 
+#### [simpletranscribe-rs](https://crates.io/crates/simple_transcribe_rs) automatically downloads a whisper model defined by tiny, base, small, medium or large in the code and paths to: /models<br/> 
 tiny is fastest but can be off, small takes a little bit but is more accurate.. something's not allowing %100 cpu usage on STT, plan to change it for an onnx STT system at some point?
 
 #### voice sources:<br/>
