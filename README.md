@@ -1,5 +1,7 @@
 # kokoro-onnx needs to be [downloaded](https://huggingface.co/onnx-community/Kokoro-82M-ONNX) <br/>
-from the hugging face repo. works with most versions of kokoro with the model.onnx download.  create & place in /onnx
+from the hugging face repo. works with most versions of kokoro with the model.onnx download.  create & place in /onnx<br/>
+
+### this is not a great/good implementation or "proper" this is a "make it up as you go wip custom implementation"<br/>
 
 #### [simpletranscribe-rs](https://crates.io/crates/simple_transcribe_rs) automatically downloads a whisper model defined by tiny,base, small, medium, large in /models<br/> 
 tiny is fastest but can be off, small takes a little bit but is more accurate.. something's not allowing %100 cpu usage on STT, plan to change it for an onnx STT system at some point?
