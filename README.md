@@ -2,9 +2,11 @@
 from the hugging face repo. works with most versions of kokoro with the model.onnx download. (unsure about quants)  create & place in /onnx<br/>
 
 ### this is not a great/good implementation or "proper" this is a "make it up as you go wip custom implementation"<br/>
+<img width="802" height="632" alt="kokoro_EnrId9JDja" src="https://github.com/user-attachments/assets/0e29a9be-d82e-4600-a62d-e7f32978fc9f" />
 
 #### [simpletranscribe-rs](https://crates.io/crates/simple_transcribe_rs) automatically downloads a whisper model defined by tiny, base, small, medium or large in the code and paths to: /models<br/> 
-tiny is fastest but can be off, small takes a little bit but is more accurate.. something's not allowing %100 cpu usage on STT, plan to change it for an onnx STT system at some point?
+tiny is fastest but can be off, small takes a little bit but is more accurate.. something's not allowing %100 cpu usage on STT, plan to change it for an onnx STT system at some point?<br/>
+use ` to toggle STT<br/>
 
 #### voice sources:<br/>
 [kokoro onnx v1](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/tree/main/voices)<br/> 
@@ -15,12 +17,11 @@ tiny is fastest but can be off, small takes a little bit but is more accurate.. 
  for powershell with base msvs2022 installed with libclang pkg:<br/>
  $env:LIBCLANG_PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\x64\lib"<br/>
 
-
 ## lm studio:<br/>
 start the server, load the model you want.<br/>
 if no model is defined in settings it'll use the first loaded one in lm studio.<br/>
 
+
 #### License
 kokoro-onnx: MIT<br/>
 kokoro model: Apache 2.0<br/>
-to adhere to their licenses i'll publish this under MIT<br/>
