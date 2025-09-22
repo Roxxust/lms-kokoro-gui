@@ -21,6 +21,6 @@ start the server, load the model you want.<br/>
 if no model is defined in settings it'll use the first loaded one in lm studio.<br/>
 
 #### License
-kokoro-onnx: MIT
-kokoro model: Apache 2.0
-to adhere to their licenses i'll publish this under MIT
+kokoro-onnx: MIT<br/>
+kokoro model: Apache 2.0<br/>
+to adhere to their licenses i'll publish this under MIT<br/>
