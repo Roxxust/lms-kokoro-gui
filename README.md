@@ -17,6 +17,19 @@ use ` to toggle STT<br/>
  for powershell with base msvs2022 installed with libclang pkg:<br/>
  $env:LIBCLANG_PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\x64\lib"<br/>
 
+## features:<br/>
+stt<br/>
+tts<br/>
+bson memory storage for context(needs to be expanded to support loading, saving etc. currently dies when app is closed but .bin retains previous message history)<br/>
+settings for models<br/>
+loading/unloading models<br/>
+image uploading<br/>
+re-sizable chat input<br/>
+codeblocks<br/>
+reasoning<br/>
+message streaming<br/>
+20+ voices<br/>
+
 ## lm studio:<br/>
 start the server, load the model you want.<br/>
 if no model is defined in settings it'll use the first loaded one in lm studio.<br/>
