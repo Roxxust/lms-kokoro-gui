@@ -1,5 +1,5 @@
 # kokoro-onnx needs to be [downloaded](https://huggingface.co/onnx-community/Kokoro-82M-ONNX) <br/>
-from the hugging face repo. works with most versions of kokoro with the model.onnx download.  create & place in /onnx<br/>
+from the hugging face repo. works with most versions of kokoro with the model.onnx download. (unsure about quants)  create & place in /onnx<br/>
 
 ### this is not a great/good implementation or "proper" this is a "make it up as you go wip custom implementation"<br/>
 
@@ -14,3 +14,9 @@ tiny is fastest but can be off, small takes a little bit but is more accurate.. 
 ### **needs libclang**.<br/>
  for powershell with base msvs2022 installed with libclang pkg:<br/>
  $env:LIBCLANG_PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\x64\lib"<br/>
+
+
+## lm studio:<br/>
+start the server, load the model you want.<br/>
+if no model is defined in settings it'll use the first loaded one in lm studio.<br/>
+
