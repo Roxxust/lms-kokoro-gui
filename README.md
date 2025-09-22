@@ -34,7 +34,19 @@ message streaming<br/>
 start the server, load the model you want.<br/>
 if no model is defined in settings it'll use the first loaded one in lm studio.<br/>
 
-
+### instructions:<br/>
+download the code/files or clone it into it's own folder.<br/>
+download the onnx model and place it in the source/repo/kokoro/onnx (or w.e you call it)<br/>
+compile the code with libclang<br/>
+run the .exe or in debug<br/>
+final folder structure should be:<br/>
+kokoro/src<br/>
+kokoro/onnx<br/>
+kokoro/voices<br/>
+kokoro/models<br/>
+cargo.toml<br/>
+etc.<br/>
+ 
 #### License
 kokoro-onnx: MIT<br/>
 kokoro model: Apache 2.0<br/>
