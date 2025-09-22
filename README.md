@@ -2,7 +2,7 @@
 from the hugging face repo. works with most versions of kokoro with the model.onnx download. (unsure about quants)  create & place in /onnx<br/>
 
 ### this is not a great/good implementation or "proper" this is a "make it up as you go wip custom implementation"<br/>
-<img width="802" height="632" alt="kokoro_EnrId9JDja" src="https://github.com/user-attachments/assets/0e29a9be-d82e-4600-a62d-e7f32978fc9f" />
+<img width="1456" height="1053" alt="image" src="https://github.com/user-attachments/assets/ef1bb317-a386-4b47-9cc0-b7f7a326bfcb" />
 
 #### [simpletranscribe-rs](https://crates.io/crates/simple_transcribe_rs) automatically downloads a whisper model defined by tiny, base, small, medium or large in the code and paths to: /models<br/> 
 tiny is fastest but can be off, small takes a little bit but is more accurate.. something's not allowing %100 cpu usage on STT, plan to change it for an onnx STT system at some point?<br/>
