@@ -1,5 +1,6 @@
 # kokoro-onnx needs to be [downloaded](https://huggingface.co/onnx-community/Kokoro-82M-ONNX) <br/>
 from the hugging face repo. works with most versions of kokoro with the model.onnx download. (unsure about quants)  create & place in /onnx<br/>
+(this is also the source for the tokenizer, settings & config files*(or the v1))<br/>
 
 ### this is not a great/good implementation or "proper" this is a "make it up as you go wip custom implementation"<br/>
 <img width="1456" height="1053" alt="image" src="https://github.com/user-attachments/assets/ef1bb317-a386-4b47-9cc0-b7f7a326bfcb" />
