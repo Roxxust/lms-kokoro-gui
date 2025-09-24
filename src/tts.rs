@@ -917,13 +917,43 @@ pub fn g2p_with_context(text: &str) -> String {
     let re = Regex::new(r#"[\w']+(?:'[\w']+)*|\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?|\W+"#).unwrap();
     let tokens: Vec<&str> = re.find_iter(text).map(|mat| mat.as_str()).collect();
     let mut out = String::new();
+    
     for (i, &tok) in tokens.iter().enumerate() {
-        if tok.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '.') && tok.chars().any(|c| c.is_ascii_digit()) {
-             out.push_str(&word2ipa(&string_number_to_words(tok)));
+        if tok.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '.') && 
+           tok.chars().any(|c| c.is_ascii_digit()) {
+            out.push_str(&word2ipa(&string_number_to_words(tok)));
         } else if tok.chars().all(|c| c.is_alphanumeric() || c == '\'') {
-            let context_before = if i > 0 { tokens[i - 1] } else { "" };
-            let context_after = if i + 1 < tokens.len() { tokens[i + 1] } else { "" };
-            out.push_str(&word2ipa_with_context(tok, context_before, context_after));
+            // --- IMPROVED CONTEXT GATHERING ---
+            // Look for actual words (not spaces/punctuation) within a reasonable distance
+            let mut context_before_words = Vec::new();
+            let mut j = i;
+            while j > 0 {
+                j -= 1;
+                if tokens[j].chars().all(|c| c.is_alphanumeric() || c == '\'') {
+                    context_before_words.insert(0, tokens[j]);
+                    if context_before_words.len() >= 5 { // Look back up to 5 words
+                        break;
+                    }
+                }
+            }
+            
+            let mut context_after_words = Vec::new();
+            let mut j = i + 1;
+            while j < tokens.len() {
+                if tokens[j].chars().all(|c| c.is_alphanumeric() || c == '\'') {
+                    context_after_words.push(tokens[j]);
+                    if context_after_words.len() >= 5 { // Look ahead up to 5 words
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            
+            let context_before = context_before_words.join(" ");
+            let context_after = context_after_words.join(" ");
+            // --- END IMPROVED CONTEXT GATHERING ---
+            
+            out.push_str(&word2ipa_with_context(tok, &context_before, &context_after));
         } else {
             out.push_str(tok);
         }
