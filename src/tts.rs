@@ -147,464 +147,739 @@ pub fn play_waveform(wave: Vec<f32>, stop_flag: Arc<AtomicBool>) -> Result<(), B
     Ok(())
 }
 
+// --- 1. Main letters_to_ipa function ---
 pub fn letters_to_ipa(word: &str) -> String {
-    pub static BASE_LETTERS_IPA_MAP: Lazy<std::collections::HashMap<char, &'static str>> = Lazy::new(|| {
-         let mut m = std::collections::HashMap::new();
-         m.insert('a', "æ");
-         m.insert('b', "b");
-         m.insert('c', "k");
-         m.insert('d', "d");
-         m.insert('e', "ɛ");
-         m.insert('f', "f");
-         m.insert('g', "ɡ");
-         m.insert('h', "h");
-         m.insert('i', "ɪ");
-         m.insert('j', "dʒ");
-         m.insert('k', "k");
-         m.insert('l', "l");
-         m.insert('m', "m");
-         m.insert('n', "n");
-         m.insert('o', "ɑ");
-         m.insert('p', "p");
-         m.insert('q', "k");
-         m.insert('r', "ɹ");
-         m.insert('s', "s");
-         m.insert('t', "t");
-         m.insert('u', "ʌ");
-         m.insert('v', "v");
-         m.insert('w', "w");
-         m.insert('x', "ks");
-         m.insert('y', "j");
-         m.insert('z', "z");
-         m
+    // Define the base character to IPA mapping
+    static BASE_LETTERS_IPA_MAP: Lazy<HashMap<char, &'static str>> = Lazy::new(|| {
+        let mut m = std::collections::HashMap::new();
+        m.insert('a', "æ");
+        m.insert('b', "b");
+        m.insert('c', "k");
+        m.insert('d', "d");
+        m.insert('e', "ɛ");
+        m.insert('f', "f");
+        m.insert('g', "ɡ");
+        m.insert('h', "h");
+        m.insert('i', "ɪ");
+        m.insert('j', "dʒ");
+        m.insert('k', "k");
+        m.insert('l', "l");
+        m.insert('m', "m");
+        m.insert('n', "n");
+        m.insert('o', "ɑ");
+        m.insert('p', "p");
+        m.insert('q', "k");
+        m.insert('r', "ɹ");
+        m.insert('s', "s");
+        m.insert('t', "t");
+        m.insert('u', "ʌ");
+        m.insert('v', "v");
+        m.insert('w', "w");
+        m.insert('x', "ks");
+        m.insert('y', "j");
+        m.insert('z', "z");
+        m
     });
+
+    // --- Pre-process character list and helper functions ---
     let chars: Vec<char> = word.chars().collect();
     let len = chars.len();
+    let to_lower = |c: char| c.to_lowercase().next().unwrap_or(c);
+    let is_vowel = |c: char| ['a', 'e', 'i', 'o', 'u', 'y'].contains(&to_lower(c));
+    let is_consonant = |c: char| ['b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'm', 'n', 'p', 'q', 'r', 's', 't', 'v', 'w', 'x', 'z'].contains(&to_lower(c));
+    let is_liquid_or_nasal = |c: char| ['l', 'm', 'n', 'r', 'w'].contains(&to_lower(c));
+
+    // --- 1.1: Initialize IPA result string ---
     let mut ipa_result = String::new();
     let mut i = 0;
+
+    // --- 1.2: Process each character based on its type and context ---
     while i < len {
-        let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
-        let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
-        let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
-        let next_next_next_char_lower = if i + 3 < len { chars[i + 3].to_lowercase().next().unwrap_or(chars[i + 3]) } else { '\0' };
-        let prev_char_lower = if i > 0 { chars[i - 1].to_lowercase().next().unwrap_or(chars[i - 1]) } else { '\0' };
-        let _prev_prev_char_lower = if i > 1 { chars[i - 2].to_lowercase().next().unwrap_or(chars[i - 2]) } else { '\0' };
-        let is_vowel = |c: char| ['a', 'e', 'i', 'o', 'u', 'y'].contains(&c);
-        let is_consonant = |c: char| ['b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'm', 'n', 'p', 'q', 'r', 's', 't', 'v', 'w', 'x', 'z'].contains(&c);
-        let is_liquid_or_nasal = |c: char| ['l', 'm', 'n', 'r', 'w'].contains(&c);
-        match current_char_lower {
+        // Removed unused variable: let current_char_lower = to_lower(chars[i]);
+        let _next_char_lower = if i + 1 < len { to_lower(chars[i + 1]) } else { '\0' };
+        let _next_next_char_lower = if i + 2 < len { to_lower(chars[i + 2]) } else { '\0' };
+        let _next_next_next_char_lower = if i + 3 < len { to_lower(chars[i + 3]) } else { '\0' };
+        let prev_char_lower = if i > 0 { to_lower(chars[i - 1]) } else { '\0' };
+        let _prev_prev_char_lower = if i > 1 { to_lower(chars[i - 2]) } else { '\0' };
+
+        match to_lower(chars[i]) { // Use to_lower(chars[i]) directly in the match
             'a' => {
-                if (next_char_lower == 'i' && (i + 2 >= len || !chars[i + 2].is_alphabetic())) ||
-                   (next_char_lower == 'y' && (i + 2 >= len || !chars[i + 2].is_alphabetic())) ||
-                   (next_char_lower == 'i' && next_next_char_lower == 'g' && next_next_next_char_lower == 'h' && (i + 4 >= len || !chars[i + 4].is_alphabetic())) {
-                    ipa_result.push_str("eɪ");
-                    i += if next_char_lower == 'i' && next_next_char_lower == 'g' { 4 } else { 2 };
-                    continue;
-                }
-                else if (next_char_lower == 'u' || next_char_lower == 'w') ||
-                        (next_char_lower == 'l' && i + 2 < len && ['f', 'm', 's', 't', 'b', 'd', 'g', 'k', 'p', 'v', 'z'].contains(&next_next_char_lower)) {
-                     ipa_result.push_str("ɔː");
-                     i += 2;
-                     continue;
-                }
-                else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
-                     ipa_result.push_str("ɛə");
-                     i += 1;
-                     continue;
-                }
-                else if next_char_lower == 'r' && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
-                     ipa_result.push_str("ɛə");
-                     i += 3;
-                     continue;
-                }
-                else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
-                     ipa_result.push_str("eɪ");
-                     i += 3;
-                     continue;
-                }
-                else if next_char_lower == 'l' && i + 2 < len && ['m', 'n', 'k'].contains(&next_next_char_lower) {
-                     ipa_result.push_str("ɔː");
-                     i += 1;
-                     continue;
-                }
-                ipa_result.push('æ');
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_vowel_a(i, len, &chars, &is_vowel, &is_consonant);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'a'
             }
             'e' => {
-                if next_char_lower == 'e' || next_char_lower == 'a' || next_char_lower == 'i' || next_char_lower == 'y' {
-                    if i == 0 && len == 3 && next_char_lower == 'y' && next_next_char_lower == 'e' {
-                         ipa_result.push_str("aɪ");
-                         i += 3;
-                         continue;
-                    }
-                    ipa_result.push_str("iː");
-                    i += 2;
-                    continue;
-                }
-                else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
-                     ipa_result.push_str("ɪə");
-                     i += 1;
-                     continue;
-                }
-                else if next_char_lower == 'w' {
-                     ipa_result.push_str("juː");
-                     i += 2;
-                     continue;
-                }
-                else if i == len - 1 && prev_char_lower != '\0' && is_consonant(prev_char_lower) {
-                     i += 1;
-                     continue;
-                }
-                else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
-                     ipa_result.push_str("iː");
-                     i += 3;
-                     continue;
-                }
-                ipa_result.push('ɛ');
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_vowel_e(i, len, &chars, &is_vowel, &is_consonant, prev_char_lower);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'e'
             }
             'i' => {
-                if next_char_lower == 'e' && (i + 2 >= len || !chars[i + 2].is_alphabetic()) {
-                    ipa_result.push_str("aɪ");
-                    i += 2;
-                    continue;
-                }
-                else if next_char_lower == 'g' && next_next_char_lower == 'h' {
-                     ipa_result.push_str("aɪ");
-                     i += 3;
-                     continue;
-                }
-                else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
-                     ipa_result.push_str("aɪə");
-                     i += 1;
-                     continue;
-                }
-                else if next_char_lower == 'r' && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
-                     ipa_result.push_str("aɪə");
-                     i += 3;
-                     continue;
-                }
-                else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
-                     ipa_result.push_str("aɪ");
-                     i += 3;
-                     continue;
-                }
-                ipa_result.push('ɪ');
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_vowel_i(i, len, &chars, &is_vowel, &is_consonant);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'i'
             }
             'o' => {
-                if next_char_lower == 'o' {
-                    ipa_result.push_str("uː");
-                    i += 2;
-                    continue;
-                }
-                else if (next_char_lower == 'a' || next_char_lower == 'e') ||
-                        (next_char_lower == 'w' && i + 2 < len) {
-                     ipa_result.push_str("əʊ");
-                     i += 2;
-                     continue;
-                }
-                else if next_char_lower == 'i' || next_char_lower == 'y' {
-                     ipa_result.push_str("ɔɪ");
-                     i += 2;
-                     continue;
-                }
-                else if next_char_lower == 'u' {
-                     ipa_result.push_str("aʊ");
-                     i += 2;
-                     continue;
-                }
-                else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
-                     ipa_result.push_str("əʊ");
-                     i += 3;
-                     continue;
-                }
-                else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
-                     ipa_result.push_str("ɔː");
-                     i += 1;
-                     continue;
-                }
-                else if next_char_lower == 'r' && next_next_char_lower == 'e' {
-                     ipa_result.push_str("ɔː");
-                     i += 3;
-                     continue;
-                }
-                else if next_char_lower == 'o' && next_next_char_lower == 'r' {
-                     ipa_result.push_str("ɔː");
-                     i += 3;
-                     continue;
-                }
-                else if next_char_lower == 'u' && next_next_char_lower == 'r' {
-                     ipa_result.push_str("aʊə");
-                     i += 3;
-                     continue;
-                }
-                else if next_char_lower == '\'' {
-                     ipa_result.push_str("əʊ");
-                     i += 1;
-                     continue;
-                }
-                else if next_char_lower == 'w' && i + 2 == len {
-                     ipa_result.push_str("aʊ");
-                     i += 2;
-                     continue;
-                }
-                else if next_char_lower == 'n' && i + 2 < len && ['g', 'k'].contains(&next_next_char_lower) {
-                     ipa_result.push_str("ɔː");
-                     i += 1;
-                     continue;
-                }
-                ipa_result.push('ɒ');
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_vowel_o(i, len, &chars, &is_vowel, &is_consonant, &is_liquid_or_nasal);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'o'
             }
             'u' => {
-                if next_char_lower == 'e' && (i + 2 >= len || !chars[i + 2].is_alphabetic()) {
-                    ipa_result.push_str("juː");
-                    i += 2;
-                    continue;
-                }
-                else if next_char_lower == 'i' {
-                     ipa_result.push_str("juː");
-                     i += 2;
-                     continue;
-                }
-                else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
-                     ipa_result.push_str("ɜː");
-                     i += 1;
-                     continue;
-                }
-                else if next_char_lower == 'r' && next_next_char_lower == 'e' {
-                     ipa_result.push_str("jʊə");
-                     i += 3;
-                     continue;
-                }
-                else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
-                     ipa_result.push_str("juː");
-                     i += 3;
-                     continue;
-                }
-                else if next_char_lower == 'i' && next_next_char_lower == 'r' {
-                     ipa_result.push_str("aɪə");
-                     i += 3;
-                     continue;
-                }
-                else if next_char_lower == 'o' && i + 2 < len && ['l', 'r', 's'].contains(&next_next_char_lower) {
-                     ipa_result.push('ʊ');
-                     i += 2;
-                     continue;
-                }
-                ipa_result.push('ʌ');
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_vowel_u(i, len, &chars, &is_vowel, &is_consonant, &is_liquid_or_nasal, prev_char_lower);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'u'
             }
             'c' => {
-                if ['e', 'i', 'y'].contains(&next_char_lower) {
-                    ipa_result.push('s');
-                } else {
-                    ipa_result.push('k');
-                }
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_consonant_c(i, len, &chars);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'c'
             }
             'g' => {
-                if ['e', 'i', 'y'].contains(&next_char_lower) && !(i > 0 && prev_char_lower == 'g') {
-                    if next_char_lower == 'h' {
-                        if i + 2 == len || ['t', 's', 'u'].contains(&next_next_char_lower) {
-                        } else {
-                            ipa_result.push_str("dʒ");
-                        }
-                    } else {
-                        ipa_result.push_str("dʒ");
-                    }
-                } else {
-                    ipa_result.push('ɡ');
-                }
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_consonant_g(i, len, &chars, prev_char_lower);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'g'
             }
             'h' => {
-                if i == 0 && is_vowel(next_char_lower) {
-                    ipa_result.push('h');
-                } else if i > 0 && is_vowel(prev_char_lower) && is_vowel(next_char_lower) {
-                    ipa_result.push('h');
-                } else if i > 0 && is_consonant(prev_char_lower) {
-                } else {
-                    ipa_result.push('h');
-                }
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_consonant_h(i, len, &chars, &is_vowel, &is_consonant, prev_char_lower);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'h'
             }
             't' => {
-                if next_char_lower == 'h' {
-                    let is_voiced = if i + 2 < len && next_next_char_lower != '\0' {
-                        is_vowel(next_next_char_lower) && (is_vowel(prev_char_lower) || is_liquid_or_nasal(prev_char_lower))
-                    } else {
-                        false
-                    };
-                    if is_voiced {
-                        ipa_result.push_str("ð");
-                    } else {
-                        ipa_result.push_str("θ");
-                    }
-                    i += 2;
-                    continue;
-                }
-                else if next_char_lower == 'i' && next_next_char_lower == 'o' && i + 3 < len && next_next_next_char_lower == 'n' {
-                     if prev_char_lower == 's' || (prev_char_lower == 'l' || prev_char_lower == 'n') {
-                         ipa_result.push_str("ʒ");
-                     }
-                     else if prev_char_lower != '\0' && is_consonant(prev_char_lower) {
-                         ipa_result.push_str("ʃ");
-                     } else {
-                         ipa_result.push_str("t");
-                         i += 1;
-                         continue;
-                     }
-                     i += 3;
-                     ipa_result.push('ə');
-                     ipa_result.push('n');
-                     i += 1;
-                     continue;
-                }
-                else if next_char_lower == 'c' && next_next_char_lower == 'h' {
-                     ipa_result.push_str("tʃ");
-                     i += 3;
-                     continue;
-                }
-                else if next_char_lower == 't' && next_next_char_lower == 'l' && next_next_next_char_lower == 'e' && (i + 4 >= len || !chars[i + 4].is_alphabetic()) {
-                     ipa_result.push('t');
-                     ipa_result.push('ə');
-                     ipa_result.push('l');
-                     i += 4;
-                     continue;
-                }
-                ipa_result.push('t');
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_consonant_t(i, len, &chars, &is_vowel, &is_consonant, &is_liquid_or_nasal, prev_char_lower);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 't'
             }
-             's' => {
-                let is_z_sound = if i + 1 < len && next_char_lower != '\0' {
-                    is_vowel(prev_char_lower) && is_vowel(next_char_lower)
-                } else {
-                     is_vowel(prev_char_lower)
-                };
-                if is_z_sound {
-                    ipa_result.push('z');
-                }
-                else if next_char_lower == 'h' {
-                     ipa_result.push_str("ʃ");
-                     i += 2;
-                     continue;
-                }
-                else if next_char_lower == 'i' && next_next_char_lower == 'o' && i + 3 < len && next_next_next_char_lower == 'n' {
-                     ipa_result.push_str("ʒ");
-                     i += 3;
-                     ipa_result.push('ə');
-                     ipa_result.push('n');
-                     i += 1;
-                     continue;
-                }
-                else if next_char_lower == 's' {
-                     ipa_result.push('s');
-                     i += 2;
-                     continue;
-                }
-                else {
-                    ipa_result.push('s');
-                }
-                i += 1;
-                continue;
+            's' => {
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_consonant_s(i, len, &chars, &is_vowel, prev_char_lower);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 's'
             }
             'y' => {
-                if i == 0 && next_char_lower != '\0' {
-                    ipa_result.push('j');
-                }
-                else if i == len - 1 {
-                    if is_vowel(prev_char_lower) {
-                        ipa_result.push('i');
-                    } else {
-                        ipa_result.push_str("aɪ");
-                    }
-                }
-                else {
-                    ipa_result.push('i');
-                }
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_consonant_or_vowel_y(i, len, &chars, &is_vowel);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'y'
             }
             'q' => {
-                if next_char_lower == 'u' {
-                    ipa_result.push_str("kw");
-                    i += 2;
-                    continue;
-                } else {
-                    ipa_result.push('k');
-                    i += 1;
-                    continue;
-                }
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_consonant_q(i, len, &chars);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'q'
             }
             'w' => {
-                if next_char_lower == 'h' {
-                    ipa_result.push_str("ʍ");
-                    i += 2;
-                    continue;
-                }
-                ipa_result.push('w');
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_consonant_w(i, len, &chars);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'w'
             }
             'x' => {
                 ipa_result.push_str("ks");
                 i += 1;
-                continue;
+                continue; // 'x' is simple, just add "ks" and continue
             }
             'k' => {
-                if next_char_lower == 'n' && i == 0 {
-                    i += 1;
-                    continue;
-                }
-                else if i > 0 && prev_char_lower == 'c' && next_char_lower == 'n' {
-                     ipa_result.push('k');
-                     i += 1;
-                     continue;
-                }
-                ipa_result.push('k');
-                i += 1;
-                continue;
+                // Use the new helper function
+                let (processed_len, processed_ipa) = process_consonant_k(i, len, &chars, prev_char_lower);
+                ipa_result.push_str(&processed_ipa);
+                i += processed_len;
+                continue; // Continue to the next iteration after processing 'k'
             }
             _ => {
+                // Handle any character not explicitly handled above
+                let current_char_lower = to_lower(chars[i]); // Define only when needed
                 if let Some(&ipa) = BASE_LETTERS_IPA_MAP.get(&current_char_lower) {
                     ipa_result.push_str(ipa);
                 } else {
+                    // Log a warning for truly unknown characters
                     eprintln!("Warning: Unknown character '{}' in fallback G2P for word '{}'", chars[i], word);
+                    // Fallback: add the character itself, though this is unlikely for alphabetic input
+                     ipa_result.push_str(&chars[i].to_string());
                 }
-                i += 1;
-                continue;
+                i += 1; // Move to the next character
+                continue; // Continue to the next iteration after handling default case
             }
         }
     }
-    if word.len() > 2 && word.to_lowercase().ends_with("ed") && ipa_result.len() >= 2 {
+
+    // --- 1.3: Apply suffix rules ---
+    apply_suffix_rules(&mut ipa_result, word);
+
+    // --- 1.4: Apply stress patterns ---
+    apply_stress_patterns(&mut ipa_result);
+
+    // --- 1.5: Return the final IPA string ---
+    ipa_result
+}
+
+// --- 2. Helper functions for vowels ---
+
+// --- 2.1: Process 'a' ---
+fn process_vowel_a(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+    let next_next_next_char_lower = if i + 3 < len { chars[i + 3].to_lowercase().next().unwrap_or(chars[i + 3]) } else { '\0' };
+
+    let mut ipa = String::new();
+    let mut increment = 1; // Default increment
+
+    if (next_char_lower == 'i' && (i + 2 >= len || !chars[i + 2].is_alphabetic())) ||
+       (next_char_lower == 'y' && (i + 2 >= len || !chars[i + 2].is_alphabetic())) ||
+       (next_char_lower == 'i' && next_next_char_lower == 'g' && next_next_next_char_lower == 'h' && (i + 4 >= len || !chars[i + 4].is_alphabetic())) {
+        ipa.push_str("eɪ");
+        increment = if next_char_lower == 'i' && next_next_char_lower == 'g' { 4 } else { 2 };
+    }
+    else if (next_char_lower == 'u' || next_char_lower == 'w') ||
+            (next_char_lower == 'l' && i + 2 < len && ['f', 'm', 's', 't', 'b', 'd', 'g', 'k', 'p', 'v', 'z'].contains(&next_next_char_lower)) {
+         ipa.push_str("ɔː");
+         increment = 2;
+    }
+    else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
+         ipa.push_str("ɛə");
+         increment = 1; // Only move past 'a', not 'r' or next vowel here
+    }
+    else if next_char_lower == 'r' && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("ɛə");
+         increment = 3;
+    }
+    else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("eɪ");
+         increment = 3;
+    }
+    else if next_char_lower == 'l' && i + 2 < len && ['m', 'n', 'k'].contains(&next_next_char_lower) {
+         ipa.push_str("ɔː");
+         increment = 1; // Only move past 'a', not 'l' or next char here
+    }
+    else {
+        ipa.push('æ');
+        // increment remains 1
+    }
+
+    (increment, ipa)
+}
+
+// --- 2.2: Process 'e' ---
+fn process_vowel_e(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+    prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+
+    let mut ipa = String::new();
+    let mut increment = 1;
+
+    if next_char_lower == 'e' || next_char_lower == 'a' || next_char_lower == 'i' || next_char_lower == 'y' {
+        if i == 0 && len == 3 && next_char_lower == 'y' && next_next_char_lower == 'e' {
+             ipa.push_str("aɪ");
+             increment = 3;
+        } else {
+            ipa.push_str("iː");
+            increment = 2;
+        }
+    }
+    else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
+         ipa.push_str("ɪə");
+         increment = 1;
+    }
+    else if next_char_lower == 'w' {
+         ipa.push_str("juː");
+         increment = 2;
+    }
+    else if i == len - 1 && prev_char_lower != '\0' && is_consonant(prev_char_lower) {
+         // Silent 'e' - do not add to IPA, just increment
+         ipa.clear(); // Keep empty string
+         increment = 1;
+    }
+    else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("iː");
+         increment = 3;
+    }
+    else {
+        ipa.push('ɛ');
+        // increment remains 1
+    }
+
+    (increment, ipa)
+}
+
+// --- 2.3: Process 'i' ---
+fn process_vowel_i(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+
+    let mut ipa = String::new();
+    let mut increment = 1;
+
+    if next_char_lower == 'e' && (i + 2 >= len || !chars[i + 2].is_alphabetic()) {
+        ipa.push_str("aɪ");
+        increment = 2;
+    }
+    else if next_char_lower == 'g' && next_next_char_lower == 'h' {
+         ipa.push_str("aɪ");
+         increment = 3;
+    }
+    else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
+         ipa.push_str("aɪə");
+         increment = 1;
+    }
+    else if next_char_lower == 'r' && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("aɪə");
+         increment = 3;
+    }
+    else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("aɪ");
+         increment = 3;
+    }
+    else {
+        ipa.push('ɪ');
+        // increment remains 1
+    }
+
+    (increment, ipa)
+}
+
+// --- 2.4: Process 'o' ---
+fn process_vowel_o(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+    _is_liquid_or_nasal: &dyn Fn(char) -> bool, // Prefixed with underscore
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+
+    let mut ipa = String::new();
+    let mut increment = 1;
+
+    if next_char_lower == 'o' {
+        ipa.push_str("uː");
+        increment = 2;
+    }
+    else if (next_char_lower == 'a' || next_char_lower == 'e') ||
+            (next_char_lower == 'w' && i + 2 < len) {
+         ipa.push_str("əʊ");
+         increment = 2;
+    }
+    else if next_char_lower == 'i' || next_char_lower == 'y' {
+         ipa.push_str("ɔɪ");
+         increment = 2;
+    }
+    else if next_char_lower == 'u' {
+         ipa.push_str("aʊ");
+         increment = 2;
+    }
+    else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("əʊ");
+         increment = 3;
+    }
+    else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
+         ipa.push_str("ɔː");
+         increment = 1;
+    }
+    else if next_char_lower == 'r' && next_next_char_lower == 'e' {
+         ipa.push_str("ɔː");
+         increment = 3;
+    }
+    else if next_char_lower == 'o' && next_next_char_lower == 'r' {
+         ipa.push_str("ɔː");
+         increment = 3;
+    }
+    else if next_char_lower == 'u' && next_next_char_lower == 'r' {
+         ipa.push_str("aʊə");
+         increment = 3;
+    }
+    else if next_char_lower == '\'' {
+         ipa.push_str("əʊ");
+         increment = 1;
+    }
+    else if next_char_lower == 'w' && i + 2 == len {
+         ipa.push_str("aʊ");
+         increment = 2;
+    }
+    else if next_char_lower == 'n' && i + 2 < len && ['g', 'k'].contains(&next_next_char_lower) {
+         ipa.push_str("ɔː");
+         increment = 1;
+    }
+    else {
+        ipa.push('ɒ');
+        // increment remains 1
+    }
+
+    (increment, ipa)
+}
+
+// --- 2.5: Process 'u' ---
+fn process_vowel_u(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+    _is_liquid_or_nasal: &dyn Fn(char) -> bool, // Prefixed with underscore
+    _prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+
+    let mut ipa = String::new();
+    let mut increment = 1;
+
+    if next_char_lower == 'e' && (i + 2 >= len || !chars[i + 2].is_alphabetic()) {
+        ipa.push_str("juː");
+        increment = 2;
+    }
+    else if next_char_lower == 'i' {
+         ipa.push_str("juː");
+         increment = 2;
+    }
+    else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
+         ipa.push_str("ɜː");
+         increment = 1;
+    }
+    else if next_char_lower == 'r' && next_next_char_lower == 'e' {
+         ipa.push_str("jʊə");
+         increment = 3;
+    }
+    else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("juː");
+         increment = 3;
+    }
+    else if next_char_lower == 'i' && next_next_char_lower == 'r' {
+         ipa.push_str("aɪə");
+         increment = 3;
+    }
+    else if next_char_lower == 'o' && i + 2 < len && ['l', 'r', 's'].contains(&next_next_char_lower) {
+         ipa.push('ʊ');
+         increment = 2;
+    }
+    else {
+        ipa.push('ʌ');
+        // increment remains 1
+    }
+
+    (increment, ipa)
+}
+
+// --- 3. Helper functions for consonants ---
+
+// --- 3.1: Process 'c' ---
+fn process_consonant_c(
+    i: usize,
+    len: usize,
+    chars: &[char],
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    let ipa = if ['e', 'i', 'y'].contains(&next_char_lower) {
+        's'
+    } else {
+        'k'
+    };
+    (1, ipa.to_string()) // Always increment by 1 for 'c'
+}
+
+// --- 3.2: Process 'g' ---
+fn process_consonant_g(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    prev_char_lower: char,
+) -> (usize, String) {
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+
+    // Handle 'gh' as a special case FIRST
+    if next_char_lower == 'h' {
+        // 'gh' at the end of a word is silent (knight, though)
+        if i + 2 == len {
+            return (2, String::new());
+        }
+        // 'gh' before 't', 's', 'u' is silent (knight, thought, through)
+        else if ['t', 's', 'u'].contains(&next_next_char_lower) {
+            return (2, String::new());
+        }
+        // 'gh' before vowels often makes /f/ sound (cough, laugh, enough)
+        else if ['a', 'e', 'i', 'o', 'u'].contains(&next_next_char_lower) {
+            return (2, "f".to_string());
+        }
+        // Default to silent for other 'gh' cases
+        else {
+            return (2, String::new());
+        }
+    }
+    // Handle 'g' followed by 'e', 'i', or 'y' (soft g)
+    else if ['e', 'i', 'y'].contains(&next_char_lower) && !(i > 0 && prev_char_lower == 'g') {
+        return (1, "dʒ".to_string());
+    }
+    // Default to hard 'g'
+    else {
+        return (1, "ɡ".to_string());
+    }
+}
+
+// --- 3.3: Process 'h' ---
+fn process_consonant_h(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+    prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    let ipa = if i == 0 && is_vowel(next_char_lower) {
+        'h'
+    } else if i > 0 && is_vowel(prev_char_lower) && is_vowel(next_char_lower) {
+        'h'
+    } else if i > 0 && is_consonant(prev_char_lower) {
+        // Silent 'h' after consonant
+        '\0' // Use null character as a placeholder for silent
+    } else {
+        'h'
+    };
+
+    let result = if ipa == '\0' { String::new() } else { ipa.to_string() };
+    (1, result) // Always increment by 1 for 'h'
+}
+
+// --- 3.4: Process 't' ---
+fn process_consonant_t(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+    _is_liquid_or_nasal: &dyn Fn(char) -> bool, // Prefixed with underscore
+    prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+    let next_next_next_char_lower = if i + 3 < len { chars[i + 3].to_lowercase().next().unwrap_or(chars[i + 3]) } else { '\0' };
+
+    if next_char_lower == 'h' {
+        let is_voiced = if i + 2 < len && next_next_char_lower != '\0' {
+            is_vowel(next_next_char_lower) && (is_vowel(prev_char_lower) || _is_liquid_or_nasal(prev_char_lower)) // Use the prefixed parameter
+        } else {
+            false
+        };
+        return (2, if is_voiced { "ð".to_string() } else { "θ".to_string() }); // Increment by 2 for 'th'
+    }
+    else if next_char_lower == 'i' && next_next_char_lower == 'o' && i + 3 < len && next_next_next_char_lower == 'n' {
+         let ipa = if prev_char_lower == 's' || (prev_char_lower == 'l' || prev_char_lower == 'n') {
+             "ʒ"
+         }
+         else if prev_char_lower != '\0' && is_consonant(prev_char_lower) {
+             "ʃ"
+         } else {
+             return (1, "t".to_string()); // If no special rule, just 't'
+         };
+         let mut result = ipa.to_string();
+         result.push_str("ən");
+         return (4, result); // Increment by 4 for 'tion'
+    }
+    else if next_char_lower == 'c' && next_next_char_lower == 'h' {
+         return (3, "tʃ".to_string()); // Increment by 3 for 'tch'
+    }
+    else if next_char_lower == 't' && next_next_char_lower == 'l' && next_next_next_char_lower == 'e' && (i + 4 >= len || !chars[i + 4].is_alphabetic()) {
+         return (4, "təl".to_string()); // Increment by 4 for 'ttle'
+    }
+
+    (1, "t".to_string()) // Default for 't'
+}
+
+// --- 3.5: Process 's' ---
+fn process_consonant_s(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+    let next_next_next_char_lower = if i + 3 < len { chars[i + 3].to_lowercase().next().unwrap_or(chars[i + 3]) } else { '\0' };
+
+    let is_z_sound = if i + 1 < len && next_char_lower != '\0' {
+        is_vowel(prev_char_lower) && is_vowel(next_char_lower)
+    } else {
+         is_vowel(prev_char_lower)
+    };
+
+    if is_z_sound {
+        (1, "z".to_string())
+    }
+    else if next_char_lower == 'h' {
+         (2, "ʃ".to_string()) // Increment by 2 for 'sh'
+    }
+    else if next_char_lower == 'i' && next_next_char_lower == 'o' && i + 3 < len && next_next_next_char_lower == 'n' {
+         let result = "ʒən".to_string(); // Removed 'mut' as it's not modified after creation
+         (4, result) // Increment by 4 for 'sion' producing 'ʒən'
+    }
+    else if next_char_lower == 's' {
+         (2, "s".to_string()) // Increment by 2 for 'ss'
+    }
+    else {
+        (1, "s".to_string()) // Default for 's'
+    }
+}
+
+// --- 3.6: Process 'y' ---
+fn process_consonant_or_vowel_y(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    let ipa_str = if i == 0 && next_char_lower != '\0' {
+        "j" // Consonant 'y' at beginning - String literal
+    }
+    else if i == len - 1 {
+        if is_vowel(chars.get(i.saturating_sub(1)).copied().unwrap_or('\0')) {
+            "i" // Vowel 'y' at end after vowel - String literal
+        } else {
+            "aɪ" // Vowel 'y' at end after consonant - String literal
+        }
+    }
+    else {
+        "i" // Vowel 'y' in middle - String literal
+    };
+
+    let result = ipa_str.to_string(); // Convert string literal to String
+    (1, result) // Always increment by 1 for 'y'
+}
+
+// --- 3.7: Process 'q' ---
+fn process_consonant_q(
+    i: usize,
+    len: usize,
+    chars: &[char],
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    if next_char_lower == 'u' {
+        (2, "kw".to_string()) // Increment by 2 for 'qu'
+    } else {
+        (1, "k".to_string()) // Default for 'q'
+    }
+}
+
+// --- 3.8: Process 'w' ---
+fn process_consonant_w(
+    i: usize,
+    len: usize,
+    chars: &[char],
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    if next_char_lower == 'h' {
+        (2, "ʍ".to_string()) // Increment by 2 for 'wh'
+    } else {
+        (1, "w".to_string()) // Default for 'w'
+    }
+}
+
+// --- 3.9: Process 'k' ---
+fn process_consonant_k(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    if next_char_lower == 'n' && i == 0 {
+        (1, String::new()) // Silent 'k' at beginning before 'n'
+    }
+    else if i > 0 && prev_char_lower == 'c' && next_char_lower == 'n' {
+         (1, "k".to_string()) // 'k' in 'ckn' like 'knock'
+    }
+    else {
+        (1, "k".to_string()) // Default for 'k'
+    }
+}
+
+// --- 4. Helper functions for suffixes and stress ---
+
+// --- 4.1: Apply suffix rules ---
+fn apply_suffix_rules(ipa_result: &mut String, word: &str) {
+    let word_lower = word.to_lowercase();
+
+    if word_lower.ends_with("ed") && ipa_result.len() >= 2 {
         let len = ipa_result.len();
         if len >= 3 {
              let ipa_chars: Vec<char> = ipa_result.chars().collect();
-             let last_sound_char = ipa_chars[len - 3];
-             let second_last_sound_char = if len >= 4 { ipa_chars[len - 4] } else { '\0' };
+             let last_sound_char = ipa_chars.get(len - 3).copied().unwrap_or('\0');
+             let second_last_sound_char = ipa_chars.get(len - 4).copied().unwrap_or('\0');
              if last_sound_char == 't' || last_sound_char == 'd' {
-                 ipa_result.pop();
+                 ipa_result.truncate(len - 1); // Remove last character
                  ipa_result.push_str("ɪd");
              }
              else if ['p', 'k', 'f', 's', 'ʃ', 'θ'].contains(&last_sound_char) ||
                      (last_sound_char == 'ʃ' && second_last_sound_char == 't') {
-                 ipa_result.pop();
+                 ipa_result.pop(); // Remove last character
                  ipa_result.push('t');
              }
+             // Note: The original code had logic for 'k' here which was likely a typo for 't'
         }
     }
-    if word.len() > 3 && word.to_lowercase().ends_with("ing") && ipa_result.len() >= 3 {
+
+    if word_lower.ends_with("ing") && ipa_result.len() >= 3 {
          let len = ipa_result.len();
          if len >= 3 {
              let chars_rev: Vec<char> = ipa_result.chars().rev().collect();
@@ -619,11 +894,12 @@ pub fn letters_to_ipa(word: &str) -> String {
              }
          }
     }
-    if word.len() > 2 && word.to_lowercase().ends_with("es") && ipa_result.len() >= 2 {
+
+    if word_lower.ends_with("es") && ipa_result.len() >= 2 {
         if let Some(penultimate_char) = ipa_result.chars().nth(ipa_result.len().saturating_sub(2)) {
             if ['s', 'ʃ', 'z', 'ʒ', 'θ'].contains(&penultimate_char) ||
                (penultimate_char == 't' && ipa_result.len() >= 3 && ipa_result.chars().nth(ipa_result.len().saturating_sub(3)) == Some('t')) || // tʃ
-               (penultimate_char == 'd' && ipa_result.len() >= 3 && ipa_result.chars().nth(ipa_result.len().saturating_sub(3)) == Some('t')) { // dʒ
+               (penultimate_char == 'd' && ipa_result.len() >= 3 && ipa_result.chars().nth(ipa_result.len().saturating_sub(3)) == Some('d')) { // dʒ
                 if ipa_result.ends_with('s') {
                     ipa_result.pop();
                     ipa_result.push_str("ɪz");
@@ -657,7 +933,8 @@ pub fn letters_to_ipa(word: &str) -> String {
             }
         }
     }
-    if word.len() > 3 && word.to_lowercase().ends_with("ers") && ipa_result.len() >= 3 {
+
+    if word_lower.ends_with("ers") && ipa_result.len() >= 3 {
         if let Some(last_char) = ipa_result.chars().last() {
              if ['r', 'l', 'n', 'm', 'd', 't', 'k', 'ɡ', 'p', 'b', 's', 'z', 'f', 'v', 'θ', 'ð'].contains(&last_char) ||
                 (last_char == 'ʃ' && ipa_result.len() >= 2 && ipa_result.chars().nth(ipa_result.len()-2) != Some('t')) || // Not tʃ
@@ -668,7 +945,8 @@ pub fn letters_to_ipa(word: &str) -> String {
              }
         }
     }
-    if word.len() > 3 && word.to_lowercase().ends_with("est") && ipa_result.len() >= 3 {
+
+    if word_lower.ends_with("est") && ipa_result.len() >= 3 {
         if let Some(last_char) = ipa_result.chars().last() {
              if ['t', 'd', 's', 'z', 'ʃ', 'ʒ', 'θ'].contains(&last_char) ||
                 (last_char == 'ʃ' && ipa_result.len() >= 2 && ipa_result.chars().nth(ipa_result.len()-2) == Some('t')) || // tʃ
@@ -679,7 +957,8 @@ pub fn letters_to_ipa(word: &str) -> String {
              }
         }
     }
-    if word.len() > 2 && word.to_lowercase().ends_with("ly") && ipa_result.len() >= 2 {
+
+    if word_lower.ends_with("ly") && ipa_result.len() >= 2 {
         if ipa_result.ends_with("i") {
             ipa_result.pop();
             ipa_result.push_str("aɪli");
@@ -689,11 +968,13 @@ pub fn letters_to_ipa(word: &str) -> String {
             ipa_result.push_str("li");
         }
     }
-    if word.len() > 4 && word.to_lowercase().ends_with("tion") && ipa_result.len() >= 4 {
+
+    if word_lower.ends_with("tion") && ipa_result.len() >= 4 {
         ipa_result.replace_range(ipa_result.len()-4..ipa_result.len()-2, "ʃ");
         ipa_result.push_str("ən");
     }
-    if word.len() > 4 && word.to_lowercase().ends_with("sion") && ipa_result.len() >= 4 {
+
+    if word_lower.ends_with("sion") && ipa_result.len() >= 4 {
         if ipa_result.len() >= 5 {
             let chars_rev: Vec<char> = ipa_result.chars().rev().collect();
             if chars_rev.len() >= 5 && chars_rev[3] == 's' {
@@ -708,21 +989,37 @@ pub fn letters_to_ipa(word: &str) -> String {
             ipa_result.push_str("ən");
         }
     }
-    if word.len() > 1 && word.to_lowercase().ends_with('e') && ipa_result.ends_with("ɛ") {
-        ipa_result.pop();
+
+    if word_lower.ends_with('e') && ipa_result.ends_with("ɛ") {
+        ipa_result.pop(); // Silent 'e' at end
     }
+}
+
+// --- 4.2: Apply stress patterns ---
+fn apply_stress_patterns(ipa_result: &mut String) {
+    // Only apply if no stress markers already exist
     if !ipa_result.contains("ˈ") && !ipa_result.contains("ˌ") && !ipa_result.is_empty() {
-        let mut stressed_ipa = String::new();
         let ipa_chars: Vec<char> = ipa_result.chars().collect();
         let ipa_len = ipa_chars.len();
+        let mut stressed_ipa = String::new();
         let mut primary_added = false;
         let mut i = 0;
+
+        // Define IPA vowel components
         let ipa_vowel_chars = ['a', 'e', 'i', 'o', 'u', 'æ', 'ɛ', 'ɪ', 'ɑ', 'ɔ', 'ʊ', 'ʌ', 'ə', 'ɜ', 'ɚ', 'ɝ', 'ɐ', 'ɵ', 'ɘ', 'ʏ', 'ø', 'œ', 'ɶ'];
         let ipa_vowel_strings = ["ɑ̃", "ɛ̃", "ɔ̃", "œ̃"];
         let ipa_diphthongs_triphthongs_r_colored = ["eɪ", "aɪ", "ɔɪ", "aʊ", "oʊ", "ɪə", "eə", "ʊə", "aɪə", "aʊə", "ɔɪə", "ɜː", "ɪr", "ɛr", "ɑr", "ɔr", "ʊr", "ʌr", "ər"];
-        let is_ipa_vowel = |c: char| ipa_vowel_chars.contains(&c) || ipa_vowel_strings.iter().any(|&s| s.chars().next() == Some(c)) || ipa_diphthongs_triphthongs_r_colored.iter().any(|&s| s.chars().next() == Some(c));
+
+        let is_ipa_vowel = |c: char| {
+            ipa_vowel_chars.contains(&c) ||
+            ipa_vowel_strings.iter().any(|&s| s.chars().next() == Some(c)) ||
+            ipa_diphthongs_triphthongs_r_colored.iter().any(|&s| s.chars().next() == Some(c))
+        };
+
         while i < ipa_len {
             let current_ipa = ipa_chars[i];
+
+            // Check for 3-character phonemes first
             if i + 2 < ipa_len {
                 let potential_three_char = format!("{}{}{}", current_ipa, ipa_chars[i+1], ipa_chars[i+2]);
                 if ipa_diphthongs_triphthongs_r_colored.contains(&potential_three_char.as_str()) ||
@@ -739,6 +1036,8 @@ pub fn letters_to_ipa(word: &str) -> String {
                      continue;
                 }
             }
+
+            // Check for 2-character phonemes
             if i + 1 < ipa_len {
                 let potential_two_char = format!("{}{}", current_ipa, ipa_chars[i+1]);
                 if ipa_diphthongs_triphthongs_r_colored.contains(&potential_two_char.as_str()) ||
@@ -755,6 +1054,8 @@ pub fn letters_to_ipa(word: &str) -> String {
                     continue;
                 }
             }
+
+            // Handle single character vowels
             if is_ipa_vowel(current_ipa) {
                 if !primary_added {
                     stressed_ipa.push('ˈ');
@@ -766,15 +1067,15 @@ pub fn letters_to_ipa(word: &str) -> String {
             stressed_ipa.push(current_ipa);
             i += 1;
         }
+
+        // If no vowel was found to stress, just add stress to the beginning
         if primary_added {
-             ipa_result = stressed_ipa;
+             *ipa_result = stressed_ipa;
         } else {
-            ipa_result = format!("ˈ{}", ipa_result);
+            *ipa_result = format!("ˈ{}", ipa_result);
         }
     }
-    ipa_result
 }
-
 pub fn arpa_to_ipa(token: &str) -> String {
     let re = Regex::new(r"^([A-Z!]+)(\d?)$").unwrap();
     if let Some(caps) = re.captures(token) {
