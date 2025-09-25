@@ -27,6 +27,9 @@ use crate::tts::{process_tts, AVAILABLE_VOICES};
 pub mod heteronyms;
 pub mod contractions;
 pub mod tts;
+pub mod consonant;
+pub mod numbers;
+pub mod vowels;
 
 
 const SETTINGS_FILE: &str = "settings.json";
