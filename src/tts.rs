@@ -1,9 +1,6 @@
 use super::*;
 use crate::heteronyms::HETERONYMS;
-use crate::numbers::string_number_to_words;
 use crate::contractions::word2ipa;
-use crate::consonant::{process_consonant_c, process_consonant_g, process_consonant_h, process_consonant_t, process_consonant_s, process_consonant_or_vowel_y, process_consonant_q, process_consonant_w, process_consonant_k};
-use crate::vowels::{process_vowel_a, process_vowel_e, process_vowel_i, process_vowel_o, process_vowel_u};
 use lazy_static::lazy_static;
 use futures::executor::block_on;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -200,123 +197,130 @@ pub fn letters_to_ipa(word: &str) -> String {
 
     // --- 1.2: Process each character based on its type and context ---
     while i < len {
+        // Removed unused variable: let current_char_lower = to_lower(chars[i]);
+        let _next_char_lower = if i + 1 < len { to_lower(chars[i + 1]) } else { '\0' };
+        let _next_next_char_lower = if i + 2 < len { to_lower(chars[i + 2]) } else { '\0' };
+        let _next_next_next_char_lower = if i + 3 < len { to_lower(chars[i + 3]) } else { '\0' };
         let prev_char_lower = if i > 0 { to_lower(chars[i - 1]) } else { '\0' };
+        let _prev_prev_char_lower = if i > 1 { to_lower(chars[i - 2]) } else { '\0' };
 
-        match to_lower(chars[i]) {
+        match to_lower(chars[i]) { // Use to_lower(chars[i]) directly in the match
             'a' => {
-                // Use the new helper function from vowels module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_vowel_a(i, len, &chars, &is_vowel, &is_consonant);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'a'
             }
             'e' => {
-                // Use the new helper function from vowels module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_vowel_e(i, len, &chars, &is_vowel, &is_consonant, prev_char_lower);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'e'
             }
             'i' => {
-                // Use the new helper function from vowels module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_vowel_i(i, len, &chars, &is_vowel, &is_consonant);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'i'
             }
             'o' => {
-                // Use the new helper function from vowels module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_vowel_o(i, len, &chars, &is_vowel, &is_consonant, &is_liquid_or_nasal);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'o'
             }
             'u' => {
-                // Use the new helper function from vowels module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_vowel_u(i, len, &chars, &is_vowel, &is_consonant, &is_liquid_or_nasal, prev_char_lower);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'u'
             }
             'c' => {
-                // Use the new helper function from consonant module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_consonant_c(i, len, &chars);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'c'
             }
             'g' => {
-                // Use the new helper function from consonant module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_consonant_g(i, len, &chars, prev_char_lower);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'g'
             }
             'h' => {
-                // Use the new helper function from consonant module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_consonant_h(i, len, &chars, &is_vowel, &is_consonant, prev_char_lower);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'h'
             }
             't' => {
-                // Use the new helper function from consonant module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_consonant_t(i, len, &chars, &is_vowel, &is_consonant, &is_liquid_or_nasal, prev_char_lower);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 't'
             }
             's' => {
-                // Use the new helper function from consonant module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_consonant_s(i, len, &chars, &is_vowel, prev_char_lower);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 's'
             }
             'y' => {
-                // Use the new helper function from consonant module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_consonant_or_vowel_y(i, len, &chars, &is_vowel);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'y'
             }
             'q' => {
-                // Use the new helper function from consonant module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_consonant_q(i, len, &chars);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'q'
             }
             'w' => {
-                // Use the new helper function from consonant module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_consonant_w(i, len, &chars);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'w'
             }
             'x' => {
                 ipa_result.push_str("ks");
                 i += 1;
-                continue;
+                continue; // 'x' is simple, just add "ks" and continue
             }
             'k' => {
-                // Use the new helper function from consonant module
+                // Use the new helper function
                 let (processed_len, processed_ipa) = process_consonant_k(i, len, &chars, prev_char_lower);
                 ipa_result.push_str(&processed_ipa);
                 i += processed_len;
-                continue;
+                continue; // Continue to the next iteration after processing 'k'
             }
             _ => {
                 // Handle any character not explicitly handled above
-                let current_char_lower = to_lower(chars[i]);
+                let current_char_lower = to_lower(chars[i]); // Define only when needed
                 if let Some(&ipa) = BASE_LETTERS_IPA_MAP.get(&current_char_lower) {
                     ipa_result.push_str(ipa);
                 } else {
+                    // Log a warning for truly unknown characters
                     eprintln!("Warning: Unknown character '{}' in fallback G2P for word '{}'", chars[i], word);
-                    ipa_result.push_str(&chars[i].to_string());
+                    // Fallback: add the character itself, though this is unlikely for alphabetic input
+                     ipa_result.push_str(&chars[i].to_string());
                 }
-                i += 1;
-                continue;
+                i += 1; // Move to the next character
+                continue; // Continue to the next iteration after handling default case
             }
         }
     }
@@ -331,7 +335,527 @@ pub fn letters_to_ipa(word: &str) -> String {
     ipa_result
 }
 
-// --- 2. Helper functions for vowels & consonants branched to module---
+// --- 2. Helper functions for vowels ---
+
+// --- 2.1: Process 'a' ---
+fn process_vowel_a(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+    let next_next_next_char_lower = if i + 3 < len { chars[i + 3].to_lowercase().next().unwrap_or(chars[i + 3]) } else { '\0' };
+
+    let mut ipa = String::new();
+    let mut increment = 1; // Default increment
+
+    if (next_char_lower == 'i' && (i + 2 >= len || !chars[i + 2].is_alphabetic())) ||
+       (next_char_lower == 'y' && (i + 2 >= len || !chars[i + 2].is_alphabetic())) ||
+       (next_char_lower == 'i' && next_next_char_lower == 'g' && next_next_next_char_lower == 'h' && (i + 4 >= len || !chars[i + 4].is_alphabetic())) {
+        ipa.push_str("eɪ");
+        increment = if next_char_lower == 'i' && next_next_char_lower == 'g' { 4 } else { 2 };
+    }
+    else if (next_char_lower == 'u' || next_char_lower == 'w') ||
+            (next_char_lower == 'l' && i + 2 < len && ['f', 'm', 's', 't', 'b', 'd', 'g', 'k', 'p', 'v', 'z'].contains(&next_next_char_lower)) {
+         ipa.push_str("ɔː");
+         increment = 2;
+    }
+    else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
+         ipa.push_str("ɛə");
+         increment = 1; // Only move past 'a', not 'r' or next vowel here
+    }
+    else if next_char_lower == 'r' && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("ɛə");
+         increment = 3;
+    }
+    else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("eɪ");
+         increment = 3;
+    }
+    else if next_char_lower == 'l' && i + 2 < len && ['m', 'n', 'k'].contains(&next_next_char_lower) {
+         ipa.push_str("ɔː");
+         increment = 1; // Only move past 'a', not 'l' or next char here
+    }
+    else {
+        ipa.push('æ');
+        // increment remains 1
+    }
+
+    (increment, ipa)
+}
+
+// --- 2.2: Process 'e' ---
+fn process_vowel_e(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+    prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+
+    let mut ipa = String::new();
+    let mut increment = 1;
+
+    if next_char_lower == 'e' || next_char_lower == 'a' || next_char_lower == 'i' || next_char_lower == 'y' {
+        if i == 0 && len == 3 && next_char_lower == 'y' && next_next_char_lower == 'e' {
+             ipa.push_str("aɪ");
+             increment = 3;
+        } else {
+            ipa.push_str("iː");
+            increment = 2;
+        }
+    }
+    else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
+         ipa.push_str("ɪə");
+         increment = 1;
+    }
+    else if next_char_lower == 'w' {
+         ipa.push_str("juː");
+         increment = 2;
+    }
+    else if i == len - 1 && prev_char_lower != '\0' && is_consonant(prev_char_lower) {
+         // Silent 'e' - do not add to IPA, just increment
+         ipa.clear(); // Keep empty string
+         increment = 1;
+    }
+    else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("iː");
+         increment = 3;
+    }
+    else {
+        ipa.push('ɛ');
+        // increment remains 1
+    }
+
+    (increment, ipa)
+}
+
+// --- 2.3: Process 'i' ---
+fn process_vowel_i(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+
+    let mut ipa = String::new();
+    let mut increment = 1;
+
+    if next_char_lower == 'e' && (i + 2 >= len || !chars[i + 2].is_alphabetic()) {
+        ipa.push_str("aɪ");
+        increment = 2;
+    }
+    else if next_char_lower == 'g' && next_next_char_lower == 'h' {
+         ipa.push_str("aɪ");
+         increment = 3;
+    }
+    else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
+         ipa.push_str("aɪə");
+         increment = 1;
+    }
+    else if next_char_lower == 'r' && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("aɪə");
+         increment = 3;
+    }
+    else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("aɪ");
+         increment = 3;
+    }
+    else {
+        ipa.push('ɪ');
+        // increment remains 1
+    }
+
+    (increment, ipa)
+}
+
+// --- 2.4: Process 'o' ---
+fn process_vowel_o(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+    _is_liquid_or_nasal: &dyn Fn(char) -> bool, // Prefixed with underscore
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+
+    let mut ipa = String::new();
+    let mut increment = 1;
+
+    if next_char_lower == 'o' {
+        ipa.push_str("uː");
+        increment = 2;
+    }
+    else if (next_char_lower == 'a' || next_char_lower == 'e') ||
+            (next_char_lower == 'w' && i + 2 < len) {
+         ipa.push_str("əʊ");
+         increment = 2;
+    }
+    else if next_char_lower == 'i' || next_char_lower == 'y' {
+         ipa.push_str("ɔɪ");
+         increment = 2;
+    }
+    else if next_char_lower == 'u' {
+         ipa.push_str("aʊ");
+         increment = 2;
+    }
+    else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("əʊ");
+         increment = 3;
+    }
+    else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
+         ipa.push_str("ɔː");
+         increment = 1;
+    }
+    else if next_char_lower == 'r' && next_next_char_lower == 'e' {
+         ipa.push_str("ɔː");
+         increment = 3;
+    }
+    else if next_char_lower == 'o' && next_next_char_lower == 'r' {
+         ipa.push_str("ɔː");
+         increment = 3;
+    }
+    else if next_char_lower == 'u' && next_next_char_lower == 'r' {
+         ipa.push_str("aʊə");
+         increment = 3;
+    }
+    else if next_char_lower == '\'' {
+         ipa.push_str("əʊ");
+         increment = 1;
+    }
+    else if next_char_lower == 'w' && i + 2 == len {
+         ipa.push_str("aʊ");
+         increment = 2;
+    }
+    else if next_char_lower == 'n' && i + 2 < len && ['g', 'k'].contains(&next_next_char_lower) {
+         ipa.push_str("ɔː");
+         increment = 1;
+    }
+    else {
+        ipa.push('ɒ');
+        // increment remains 1
+    }
+
+    (increment, ipa)
+}
+
+// --- 2.5: Process 'u' ---
+fn process_vowel_u(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+    _is_liquid_or_nasal: &dyn Fn(char) -> bool, // Prefixed with underscore
+    _prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+
+    let mut ipa = String::new();
+    let mut increment = 1;
+
+    if next_char_lower == 'e' && (i + 2 >= len || !chars[i + 2].is_alphabetic()) {
+        ipa.push_str("juː");
+        increment = 2;
+    }
+    else if next_char_lower == 'i' {
+         ipa.push_str("juː");
+         increment = 2;
+    }
+    else if next_char_lower == 'r' && i + 2 < len && is_vowel(next_next_char_lower) {
+         ipa.push_str("ɜː");
+         increment = 1;
+    }
+    else if next_char_lower == 'r' && next_next_char_lower == 'e' {
+         ipa.push_str("jʊə");
+         increment = 3;
+    }
+    else if i + 2 < len && is_consonant(next_char_lower) && next_next_char_lower == 'e' && (i + 3 >= len || !chars[i + 3].is_alphabetic()) {
+         ipa.push_str("juː");
+         increment = 3;
+    }
+    else if next_char_lower == 'i' && next_next_char_lower == 'r' {
+         ipa.push_str("aɪə");
+         increment = 3;
+    }
+    else if next_char_lower == 'o' && i + 2 < len && ['l', 'r', 's'].contains(&next_next_char_lower) {
+         ipa.push('ʊ');
+         increment = 2;
+    }
+    else {
+        ipa.push('ʌ');
+        // increment remains 1
+    }
+
+    (increment, ipa)
+}
+
+// --- 3. Helper functions for consonants ---
+
+// --- 3.1: Process 'c' ---
+fn process_consonant_c(
+    i: usize,
+    len: usize,
+    chars: &[char],
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    let ipa = if ['e', 'i', 'y'].contains(&next_char_lower) {
+        's'
+    } else {
+        'k'
+    };
+    (1, ipa.to_string()) // Always increment by 1 for 'c'
+}
+
+// --- 3.2: Process 'g' ---
+fn process_consonant_g(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    prev_char_lower: char,
+) -> (usize, String) {
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+
+    // Handle 'gh' as a special case FIRST
+    if next_char_lower == 'h' {
+        // 'gh' at the end of a word is silent (knight, though)
+        if i + 2 == len {
+            return (2, String::new());
+        }
+        // 'gh' before 't', 's', 'u' is silent (knight, thought, through)
+        else if ['t', 's', 'u'].contains(&next_next_char_lower) {
+            return (2, String::new());
+        }
+        // 'gh' before vowels often makes /f/ sound (cough, laugh, enough)
+        else if ['a', 'e', 'i', 'o', 'u'].contains(&next_next_char_lower) {
+            return (2, "f".to_string());
+        }
+        // Default to silent for other 'gh' cases
+        else {
+            return (2, String::new());
+        }
+    }
+    // Handle 'g' followed by 'e', 'i', or 'y' (soft g)
+    else if ['e', 'i', 'y'].contains(&next_char_lower) && !(i > 0 && prev_char_lower == 'g') {
+        return (1, "dʒ".to_string());
+    }
+    // Default to hard 'g'
+    else {
+        return (1, "ɡ".to_string());
+    }
+}
+
+// --- 3.3: Process 'h' ---
+fn process_consonant_h(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+    prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    let ipa = if i == 0 && is_vowel(next_char_lower) {
+        'h'
+    } else if i > 0 && is_vowel(prev_char_lower) && is_vowel(next_char_lower) {
+        'h'
+    } else if i > 0 && is_consonant(prev_char_lower) {
+        // Silent 'h' after consonant
+        '\0' // Use null character as a placeholder for silent
+    } else {
+        'h'
+    };
+
+    let result = if ipa == '\0' { String::new() } else { ipa.to_string() };
+    (1, result) // Always increment by 1 for 'h'
+}
+
+// --- 3.4: Process 't' ---
+fn process_consonant_t(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    is_consonant: &dyn Fn(char) -> bool,
+    _is_liquid_or_nasal: &dyn Fn(char) -> bool, // Prefixed with underscore
+    prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+    let next_next_next_char_lower = if i + 3 < len { chars[i + 3].to_lowercase().next().unwrap_or(chars[i + 3]) } else { '\0' };
+
+    if next_char_lower == 'h' {
+        let is_voiced = if i + 2 < len && next_next_char_lower != '\0' {
+            is_vowel(next_next_char_lower) && (is_vowel(prev_char_lower) || _is_liquid_or_nasal(prev_char_lower)) // Use the prefixed parameter
+        } else {
+            false
+        };
+        return (2, if is_voiced { "ð".to_string() } else { "θ".to_string() }); // Increment by 2 for 'th'
+    }
+    else if next_char_lower == 'i' && next_next_char_lower == 'o' && i + 3 < len && next_next_next_char_lower == 'n' {
+         let ipa = if prev_char_lower == 's' || (prev_char_lower == 'l' || prev_char_lower == 'n') {
+             "ʒ"
+         }
+         else if prev_char_lower != '\0' && is_consonant(prev_char_lower) {
+             "ʃ"
+         } else {
+             return (1, "t".to_string()); // If no special rule, just 't'
+         };
+         let mut result = ipa.to_string();
+         result.push_str("ən");
+         return (4, result); // Increment by 4 for 'tion'
+    }
+    else if next_char_lower == 'c' && next_next_char_lower == 'h' {
+         return (3, "tʃ".to_string()); // Increment by 3 for 'tch'
+    }
+    else if next_char_lower == 't' && next_next_char_lower == 'l' && next_next_next_char_lower == 'e' && (i + 4 >= len || !chars[i + 4].is_alphabetic()) {
+         return (4, "təl".to_string()); // Increment by 4 for 'ttle'
+    }
+
+    (1, "t".to_string()) // Default for 't'
+}
+
+// --- 3.5: Process 's' ---
+fn process_consonant_s(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+    prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+    let next_next_char_lower = if i + 2 < len { chars[i + 2].to_lowercase().next().unwrap_or(chars[i + 2]) } else { '\0' };
+    let next_next_next_char_lower = if i + 3 < len { chars[i + 3].to_lowercase().next().unwrap_or(chars[i + 3]) } else { '\0' };
+
+    let is_z_sound = if i + 1 < len && next_char_lower != '\0' {
+        is_vowel(prev_char_lower) && is_vowel(next_char_lower)
+    } else {
+         is_vowel(prev_char_lower)
+    };
+
+    if is_z_sound {
+        (1, "z".to_string())
+    }
+    else if next_char_lower == 'h' {
+         (2, "ʃ".to_string()) // Increment by 2 for 'sh'
+    }
+    else if next_char_lower == 'i' && next_next_char_lower == 'o' && i + 3 < len && next_next_next_char_lower == 'n' {
+         let result = "ʒən".to_string(); // Removed 'mut' as it's not modified after creation
+         (4, result) // Increment by 4 for 'sion' producing 'ʒən'
+    }
+    else if next_char_lower == 's' {
+         (2, "s".to_string()) // Increment by 2 for 'ss'
+    }
+    else {
+        (1, "s".to_string()) // Default for 's'
+    }
+}
+
+// --- 3.6: Process 'y' ---
+fn process_consonant_or_vowel_y(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    is_vowel: &dyn Fn(char) -> bool,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    let ipa_str = if i == 0 && next_char_lower != '\0' {
+        "j" // Consonant 'y' at beginning - String literal
+    }
+    else if i == len - 1 {
+        if is_vowel(chars.get(i.saturating_sub(1)).copied().unwrap_or('\0')) {
+            "i" // Vowel 'y' at end after vowel - String literal
+        } else {
+            "aɪ" // Vowel 'y' at end after consonant - String literal
+        }
+    }
+    else {
+        "i" // Vowel 'y' in middle - String literal
+    };
+
+    let result = ipa_str.to_string(); // Convert string literal to String
+    (1, result) // Always increment by 1 for 'y'
+}
+
+// --- 3.7: Process 'q' ---
+fn process_consonant_q(
+    i: usize,
+    len: usize,
+    chars: &[char],
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    if next_char_lower == 'u' {
+        (2, "kw".to_string()) // Increment by 2 for 'qu'
+    } else {
+        (1, "k".to_string()) // Default for 'q'
+    }
+}
+
+// --- 3.8: Process 'w' ---
+fn process_consonant_w(
+    i: usize,
+    len: usize,
+    chars: &[char],
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    if next_char_lower == 'h' {
+        (2, "ʍ".to_string()) // Increment by 2 for 'wh'
+    } else {
+        (1, "w".to_string()) // Default for 'w'
+    }
+}
+
+// --- 3.9: Process 'k' ---
+fn process_consonant_k(
+    i: usize,
+    len: usize,
+    chars: &[char],
+    prev_char_lower: char,
+) -> (usize, String) {
+    // Removed unused variable: let current_char_lower = chars[i].to_lowercase().next().unwrap_or(chars[i]);
+    let next_char_lower = if i + 1 < len { chars[i + 1].to_lowercase().next().unwrap_or(chars[i + 1]) } else { '\0' };
+
+    if next_char_lower == 'n' && i == 0 {
+        (1, String::new()) // Silent 'k' at beginning before 'n'
+    }
+    else if i > 0 && prev_char_lower == 'c' && next_char_lower == 'n' {
+         (1, "k".to_string()) // 'k' in 'ckn' like 'knock'
+    }
+    else {
+        (1, "k".to_string()) // Default for 'k'
+    }
+}
+
 // --- 4. Helper functions for suffixes and stress ---
 
 // --- 4.1: Apply suffix rules ---
@@ -570,10 +1094,104 @@ pub fn arpa_to_ipa(token: &str) -> String {
     }
 }
 
+pub fn convert_under_thousand(n: u64) -> String {
+    let ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+                "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+                "seventeen", "eighteen", "nineteen"];
+    let tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+    if n == 0 {
+        return String::new();
+    }
+    if n < 20 {
+        return ones[n as usize].to_string();
+    }
+    if n < 100 {
+        let ten_part = tens[(n / 10) as usize];
+        let one_part = if n % 10 != 0 { &ones[(n % 10) as usize] } else { "" };
+        if !one_part.is_empty() {
+            return format!("{} {}", ten_part, one_part);
+        } else {
+            return ten_part.to_string();
+        }
+    }
+    let hundreds_digit = n / 100;
+    let remainder = n % 100;
+    let hundred_part = format!("{} hundred", ones[hundreds_digit as usize]);
+    if remainder == 0 {
+        return hundred_part;
+    } else {
+        let under_hundred = convert_under_thousand(remainder);
+        return format!("{} and {}", hundred_part, under_hundred);
+    }
+}
+
+pub fn number_to_words(mut num: u64) -> String {
+    if num == 0 {
+        return "zero".to_string();
+    }
+    let scales = ["", "thousand", "million", "billion", "trillion", "quadrillion", "quintillion"];
+    let mut parts = Vec::new();
+    let mut scale_index = 0;
+    while num > 0 {
+        let chunk = num % 1000;
+        if chunk != 0 {
+            let chunk_words = convert_under_thousand(chunk);
+            if !scales[scale_index].is_empty() {
+                parts.push(format!("{} {}", chunk_words, scales[scale_index]));
+            } else {
+                parts.push(chunk_words);
+            }
+        }
+        num /= 1000;
+        scale_index += 1;
+    }
+    parts.reverse();
+    parts.join(" ")
+}
+
+pub fn string_number_to_words(number_str: &str) -> String {
+    if let Some(dot_pos) = number_str.find('.') {
+        let integer_part = &number_str[..dot_pos];
+        let fractional_part = &number_str[dot_pos + 1..];
+        let mut result = String::new();
+        let cleaned_integer: String = integer_part.chars().filter(|c| c.is_ascii_digit()).collect();
+        if !cleaned_integer.is_empty() && cleaned_integer != "0" {
+             if let Ok(int_num) = cleaned_integer.parse::<u64>() {
+                result.push_str(&number_to_words(int_num));
+             } else {
+                result.push_str(integer_part);
+             }
+             result.push_str(" point ");
+        } else if cleaned_integer == "0" {
+            result.push_str("zero point ");
+        } else {
+            result.push_str("point ");
+        }
+        for digit_char in fractional_part.chars() {
+            if digit_char.is_ascii_digit() {
+                let digit_word = match digit_char {
+                    '0' => "zero", '1' => "one", '2' => "two", '3' => "three", '4' => "four",
+                    '5' => "five", '6' => "six", '7' => "seven", '8' => "eight", '9' => "nine",
+                    _ => "",
+                };
+                result.push_str(digit_word);
+                result.push(' ');
+            }
+        }
+        result.trim_end().to_string()
+    } else {
+        let cleaned_str: String = number_str.chars().filter(|c| c.is_ascii_digit()).collect();
+        if let Ok(num) = cleaned_str.parse::<u64>() {
+            number_to_words(num)
+        } else {
+            eprintln!("Warning: Failed to parse large integer string '{}'", number_str);
+            number_str.to_string()
+        }
+    }
+}
+
 pub fn word2ipa_with_context(word: &str, context_before: &str, context_after: &str) -> String {
     let lower_word = word.to_lowercase();
-    
-    // 1. Check heteronyms (context-aware)
     if let Some(rules) = HETERONYMS.get(lower_word.as_str()) {
         let full_context = format!("{} {} {}", context_before, word, context_after);
         for (pattern, ipa) in rules {
@@ -583,8 +1201,6 @@ pub fn word2ipa_with_context(word: &str, context_before: &str, context_after: &s
             }
         }
     }
-    
-    // 2. Check CMU dictionary
     if let Some(entries) = CMU.get(&lower_word) {
         if entries.len() == 1 {
              return entries[0].pronunciation()
@@ -598,14 +1214,6 @@ pub fn word2ipa_with_context(word: &str, context_before: &str, context_after: &s
                 .collect();
         }
     }
-    
-    // 3. Check contractions - THIS IS THE MISSING STEP
-    let contraction_ipa = contractions::word2ipa(&lower_word);
-    if !contraction_ipa.is_empty() && contraction_ipa != lower_word {
-        return contraction_ipa;
-    }
-    
-    // 4. Fall back to letter-to-IPA conversion
     letters_to_ipa(word)
 }
 
@@ -613,54 +1221,62 @@ pub fn g2p_with_context(text: &str) -> String {
     let re = Regex::new(r#"[\w']+(?:'[\w']+)*|\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?|\W+"#).unwrap();
     let tokens: Vec<&str> = re.find_iter(text).map(|mat| mat.as_str()).collect();
     let mut out = String::new();
-    
     for (i, &tok) in tokens.iter().enumerate() {
-        // Handle numbers
+        // Check if token is a number (with possible commas/periods)
         if tok.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '.') && 
            tok.chars().any(|c| c.is_ascii_digit()) {
-            out.push_str(&word2ipa(&string_number_to_words(tok)));
+            // Convert the number to words (e.g., "1234" -> "one thousand two hundred and thirty four")
+            let number_phrase = string_number_to_words(tok);
+            let words: Vec<&str> = number_phrase.split_whitespace().collect();
+            
+            // Process each word individually
+            for (i, word) in words.iter().enumerate() {
+                // Process each word through the context-aware converter
+                let ipa = word2ipa_with_context(word, "", "");
+                out.push_str(&ipa);
+                
+                // Add space between words in the IPA output (but not after last word)
+                if i < words.len() - 1 {
+                    out.push(' ');
+                }
+            }
         } 
-        // Handle alphanumeric text
+        // Handle alphanumeric tokens (words)
         else if tok.chars().all(|c| c.is_alphanumeric() || c == '\'') {
-            // Gather context by looking for actual words within a reasonable distance
+            // --- IMPROVED CONTEXT GATHERING ---
+            // Look for actual words (not spaces/punctuation) within a reasonable distance
             let mut context_before_words = Vec::new();
             let mut j = i;
             while j > 0 {
                 j -= 1;
                 if tokens[j].chars().all(|c| c.is_alphanumeric() || c == '\'') {
                     context_before_words.insert(0, tokens[j]);
-                    // Limit to 5 words of context for better performance
-                    if context_before_words.len() >= 5 {
+                    if context_before_words.len() >= 5 { // Look back up to 5 words
                         break;
                     }
                 }
             }
-            
             let mut context_after_words = Vec::new();
             let mut j = i + 1;
             while j < tokens.len() {
                 if tokens[j].chars().all(|c| c.is_alphanumeric() || c == '\'') {
                     context_after_words.push(tokens[j]);
-                    // Limit to 5 words of context for better performance
-                    if context_after_words.len() >= 5 {
+                    if context_after_words.len() >= 5 { // Look ahead up to 5 words
                         break;
                     }
                 }
                 j += 1;
             }
-            
             let context_before = context_before_words.join(" ");
             let context_after = context_after_words.join(" ");
-            
-            // Use context-aware pronunciation for the current token
+            // --- END IMPROVED CONTEXT GATHERING ---
             out.push_str(&word2ipa_with_context(tok, &context_before, &context_after));
         } 
-        // Handle punctuation and other special characters
+        // Handle punctuation and other non-alphanumeric tokens
         else {
             out.push_str(tok);
         }
     }
-    
     out.trim().to_string()
 }
 
@@ -696,7 +1312,7 @@ pub mod loader {
     use super::*;
     use ndarray::Dim;
     use ort::{
-        execution_providers::{CPUExecutionProvider, DirectMLExecutionProvider},
+        execution_providers::{CPUExecutionProvider, DirectMLExecutionProvider, ROCmExecutionProvider},
         session::builder::GraphOptimizationLevel,
         session::Session,
     };
@@ -711,11 +1327,12 @@ pub mod loader {
         let cores = available_parallelism().unwrap().get();
         let cpu = CPUExecutionProvider::default().build();
         let dml = DirectMLExecutionProvider::default().build();
+        let rocm = ROCmExecutionProvider::default().build();
         let session = Session::builder().unwrap()
             .with_optimization_level(GraphOptimizationLevel::Level3).unwrap()
             .with_intra_threads(cores).unwrap()
             .with_inter_threads(cores).unwrap()
-            .with_execution_providers([cpu, dml]).unwrap()
+            .with_execution_providers([cpu, dml, rocm]).unwrap()
             .commit_from_file(model_path).unwrap();
         *MODEL.lock().unwrap() = Some(Arc::new(session));
     }
