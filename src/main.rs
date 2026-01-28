@@ -1,4 +1,3 @@
-
 use eframe::egui;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound;
@@ -24,30 +23,25 @@ use rfd::FileDialog;
 use image::{ImageOutputFormat, imageops::FilterType};
 use base64::{engine::general_purpose, Engine};
 use crate::tts::{process_tts, AVAILABLE_VOICES};
+use win_hotkeys::{HotkeyManager, VKey, InterruptHandle};
+use crossbeam_channel::{unbounded, Receiver};
 pub mod heteronyms;
-pub mod contractions;
 pub mod tts;
-pub mod consonant;
-pub mod numbers;
-pub mod vowels;
-
-
+pub mod contractions;
 const SETTINGS_FILE: &str = "settings.json";
 const MEMORY_FILE: &str = "memory.bin";
 const TEMP_AUDIO_FILE: &str = "temp_audio.wav";
-const TTS_MODEL_PATH: &str = "onnx/model.onnx";
+const TTS_MODEL_PATH: &str = "onnx/modelv1.onnx";
 const TTS_CMU_DICT_PATH: &str = "cmudict.dict";
 const TTS_TOKENIZER_PATH: &str = "tokenizer.json";
 static TTS_MODEL_LOADED: AtomicBool = AtomicBool::new(false);
 static SELECTED_VOICE_PATH: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("af_bella.bin".to_string()));
-
 #[derive(Clone, PartialEq)]
 enum Sender {
     User,
     Model,
     System,
 }
-
 #[derive(Clone)]
 struct ChatBubble {
     content: String,
@@ -60,13 +54,11 @@ struct ChatBubble {
     timestamp: Option<Instant>,
     persistent: bool,
 }
-
 enum BubbleMessage {
     New(ChatBubble),
     Update { id: egui::Id, content: String },
     Remove(egui::Id),
 }
-
 #[derive(Serialize, Deserialize)]
 struct AppSettings {
     api_url: String,
@@ -83,7 +75,6 @@ struct AppSettings {
     send_stt: bool,
     selected_voice: String,
 }
-
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -103,7 +94,6 @@ impl Default for AppSettings {
         }
     }
 }
-
 fn unique_id(prefix: &str, content: &str) -> egui::Id {
     let mut hasher = DefaultHasher::new();
     content.hash(&mut hasher);
@@ -111,14 +101,11 @@ fn unique_id(prefix: &str, content: &str) -> egui::Id {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
     egui::Id::new(format!("{}-{}-{}", prefix, now, hash))
 }
-
-
 fn save_memory(memory: &Vec<Value>) {
     if let Ok(serialized) = encode_to_vec(memory, config::standard()) {
         let _ = fs::write(MEMORY_FILE, serialized);
     }
 }
-
 fn load_memory() -> Vec<Value> {
     if let Ok(data) = fs::read(MEMORY_FILE) {
         if let Ok((mem_vec, _)) =
@@ -129,13 +116,11 @@ fn load_memory() -> Vec<Value> {
     }
     vec![serde_json::json!({"role":"system", "content": "You are an AI companion.", "id":"system-0"})]
 }
-
 fn save_app_settings(settings: &AppSettings) {
     if let Ok(json_str) = serde_json::to_string_pretty(settings) {
         let _ = fs::write(SETTINGS_FILE, json_str);
     }
 }
-
 fn load_app_settings() -> AppSettings {
     if let Ok(mut file) = fs::File::open(SETTINGS_FILE) {
         let mut contents = String::new();
@@ -147,13 +132,11 @@ fn load_app_settings() -> AppSettings {
     }
     AppSettings::default()
 }
-
 fn render_markdown(ui: &mut egui::Ui, markdown: &str) {
     for line in markdown.lines() {
         ui.add(egui::Label::new(egui::RichText::new(line).color(egui::Color32::WHITE)).wrap());
     }
 }
-
 fn render_collapsible_bubble<F: FnOnce(&mut egui::Ui)>(
     ui: &mut egui::Ui,
     label: &str,
@@ -166,7 +149,6 @@ fn render_collapsible_bubble<F: FnOnce(&mut egui::Ui)>(
             render_content(ui);
         });
 }
-
 fn highlight_code_job(code: &str, language: Option<&str>) -> egui::text::LayoutJob {
     use egui::{Color32, FontId, TextFormat};
     let ps = SyntaxSet::load_defaults_newlines();
@@ -186,15 +168,14 @@ fn highlight_code_job(code: &str, language: Option<&str>) -> egui::text::LayoutJ
                 let color = Color32::from_rgb(style.foreground.r, style.foreground.g, style.foreground.b);
                 job.append(text, 0.0, TextFormat { font_id: font.clone(), color, ..Default::default() });
             }
-            job.append("\n", 0.0, TextFormat { font_id: font.clone(), color: Color32::WHITE, ..Default::default() });
+            job.append("", 0.0, TextFormat { font_id: font.clone(), color: Color32::WHITE, ..Default::default() });
         } else {
             job.append(line, 0.0, TextFormat { font_id: font.clone(), color: Color32::WHITE, ..Default::default() });
-            job.append("\n", 0.0, TextFormat { font_id: font.clone(), color: Color32::WHITE, ..Default::default() });
+            job.append("", 0.0, TextFormat { font_id: font.clone(), color: Color32::WHITE, ..Default::default() });
         }
     }
     job
 }
-
 fn split_content_into_bubbles(sender: Sender, content: &str, is_thinking: bool) -> Vec<ChatBubble> {
     let mut bubbles = Vec::new();
     let mut remaining = content;
@@ -272,7 +253,6 @@ fn split_content_into_bubbles(sender: Sender, content: &str, is_thinking: bool) 
     }
     bubbles
 }
-
 fn strip_code_blocks(text: &str) -> String {
     let mut result = String::new();
     let mut in_code = false;
@@ -288,13 +268,11 @@ fn strip_code_blocks(text: &str) -> String {
     }
     result
 }
-
 fn send_bubbles(tx: &UnboundedSender<BubbleMessage>, sender: Sender, content: &str, is_thinking: bool) {
     for bubble in split_content_into_bubbles(sender, content, is_thinking) {
         let _ = tx.send(BubbleMessage::New(bubble));
     }
 }
-
 fn send_reasoning(tx: &UnboundedSender<BubbleMessage>, sender: Sender, reasoning: &str) {
     if reasoning.trim().is_empty() {
         return;
@@ -312,7 +290,6 @@ fn send_reasoning(tx: &UnboundedSender<BubbleMessage>, sender: Sender, reasoning
     };
     let _ = tx.send(BubbleMessage::New(bubble));
 }
-
 async fn call_model(
     client: &Client,
     api_url: &str,
@@ -360,7 +337,6 @@ async fn call_model(
         },
     }
 }
-
 async fn call_model_streaming(
     client: &Client,
     api_url: &str,
@@ -414,28 +390,36 @@ async fn call_model_streaming(
     let mut content_created = false;
     let mut reasoning_created = false;
     let mut leftover = String::new();
+
+    // CRITICAL FIX: Properly handle Server-Sent Events (SSE) format
     while let Ok(Some(chunk)) = response.chunk().await {
         let chunk_str = String::from_utf8_lossy(&chunk).to_string();
         leftover.push_str(&chunk_str);
-        while let Some(pos) = leftover.find('\n') {
-            let line = leftover[..pos].to_string();
-            leftover = leftover[pos + 1..].to_string();
-            let line = line.trim();
-            if line.is_empty() {
+
+        // Process each complete event in the chunk
+        while let Some(pos) = leftover.find("\n\n") {
+            let event = leftover[..pos].to_string();
+            leftover = leftover[pos + 2..].to_string();
+
+            // Parse the event data
+            let mut data = String::new();
+            for line in event.lines() {
+                if line.starts_with("data: ") {
+                    data = line[6..].to_string();
+                    break;
+                }
+            }
+
+            if data.is_empty() || data == "[DONE]" {
                 continue;
             }
-            let data = if line.starts_with("data:") {
-                line.trim_start_matches("data:").trim()
-            } else {
-                line
-            };
-            if data == "[DONE]" {
-                break;
-            }
-            if let Ok(json_val) = serde_json::from_str::<Value>(data) {
+
+            // Process the JSON data
+            if let Ok(json_val) = serde_json::from_str::<Value>(&data) {
                 if let Some(choices) = json_val.get("choices").and_then(|c| c.as_array()) {
                     for choice in choices {
                         if let Some(delta) = choice.get("delta") {
+                            // Process reasoning content if present
                             if let Some(reasoning) = delta.get("reasoning_content").and_then(|r| r.as_str()) {
                                 accumulated_reasoning.push_str(reasoning);
                                 if !accumulated_reasoning.trim().is_empty() {
@@ -460,6 +444,8 @@ async fn call_model_streaming(
                                     }
                                 }
                             }
+
+                            // Process content if present
                             if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
                                 accumulated_content.push_str(content);
                                 if !accumulated_content.trim().is_empty() {
@@ -489,29 +475,46 @@ async fn call_model_streaming(
                 }
             }
         }
-        if !leftover.is_empty() && content_created {
-            let current_update = accumulated_content.clone() + leftover.as_str();
-            if !current_update.trim().is_empty() {
-                let _ = tx.send(BubbleMessage::Update {
-                    id: content_bubble_id,
-                    content: current_update.trim().to_owned(),
-                });
+    }
+
+    // Process any remaining data
+    if !leftover.is_empty() {
+        let mut data = String::new();
+        for line in leftover.lines() {
+            if line.starts_with("data: ") {
+                data = line[6..].to_string();
+                break;
+            }
+        }
+
+        if !data.is_empty() && data != "[DONE]" {
+            if let Ok(json_val) = serde_json::from_str::<Value>(&data) {
+                if let Some(choices) = json_val.get("choices").and_then(|c| c.as_array()) {
+                    for choice in choices {
+                        if let Some(delta) = choice.get("delta") {
+                            if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+                                accumulated_content.push_str(content);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
-    if !leftover.is_empty() {
-        accumulated_content.push_str(leftover.as_str());
-    }
+
+    // Clean up and finalize
     accumulated_content = accumulated_content.trim_start().to_owned();
     let _ = tx.send(BubbleMessage::Remove(content_bubble_id));
     let _ = tx.send(BubbleMessage::Remove(reasoning_bubble_id));
+
     if !accumulated_reasoning.trim().is_empty() {
         send_reasoning(&tx, Sender::Model, accumulated_reasoning.trim());
     }
+
     if !accumulated_content.trim().is_empty() {
         send_bubbles(&tx, Sender::Model, accumulated_content.trim(), false);
-    }
-    if !accumulated_content.trim().is_empty() {
+
+        // Save to history
         let mut history = history_arc.lock().unwrap();
         history.push(json!({
             "role": "assistant",
@@ -519,17 +522,15 @@ async fn call_model_streaming(
             "id": format!("{:?}", content_bubble_id)
         }));
         save_memory(&*history);
-    }
-    if !accumulated_content.trim().is_empty() {
+
+        // Process TTS
         process_tts(&accumulated_content, &tts_enabled, tts_stop_flag);
     }
 }
-
 struct ModelResponse {
     content: String,
     reasoning: Option<String>,
 }
-
 fn load_model(selected_model: &str) {
     Command::new("lms")
         .arg("load")
@@ -538,7 +539,6 @@ fn load_model(selected_model: &str) {
         .spawn()
         .expect("Failed to load model");
 }
-
 fn unload_model(selected_model: &str) {
     Command::new("lms")
         .arg("unload")
@@ -547,14 +547,13 @@ fn unload_model(selected_model: &str) {
         .spawn()
         .expect("Failed to unload model");
 }
-
 fn heavy_transcribe(
     _stt_writer: Option<Arc<Mutex<Option<hound::WavWriter<std::io::BufWriter<fs::File>>>>>>,
 ) -> Result<String, String> {
     eprintln!("heavy_transcribe: Starting transcription...");
     let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
     let join_handle = rt.spawn_blocking(move || {
-        let model_handler = block_on(ModelHandler::new("small", "models/"));
+        let model_handler = block_on(ModelHandler::new("small", "models/")); // tiny, base, small, medium, large.
         let transcriber = Transcriber::new(model_handler);
         transcriber.transcribe(TEMP_AUDIO_FILE, None).map_err(|e| e.to_string())
     });
@@ -565,7 +564,9 @@ fn heavy_transcribe(
     eprintln!("heavy_transcribe: Transcribed text: {}", text);
     Ok(text)
 }
-
+enum HotkeyCommand {
+    ToggleSTT,
+}
 struct ChatApp {
     input_text: String,
     chat_bubbles: Vec<ChatBubble>,
@@ -602,18 +603,37 @@ struct ChatApp {
     transcription_tx: mpsc::Sender<String>,
     transcription_rx: mpsc::Receiver<String>,
     last_repaint: Instant,
-    // --- Add selected_voice field ---
     selected_voice: String,
+    hotkey_interrupt_handle: Option<InterruptHandle>,
+    hotkey_rx: Receiver<HotkeyCommand>,
+    background_repaint_timer: Instant,
+    shutting_down: bool,
+    force_repaint_counter: u32,
 }
-
 impl ChatApp {
     fn new() -> Self {
         let settings = load_app_settings();
         let (tx, rx) = mpsc::channel();
-        // --- Initialize selected_voice from settings ---
         let selected_voice = settings.selected_voice.clone();
-        // --- Update the global static with the loaded setting ---
         *SELECTED_VOICE_PATH.lock().unwrap() = selected_voice.clone();
+
+        let mut manager = HotkeyManager::new();
+
+        let (hotkey_tx, hotkey_rx) = unbounded();
+
+        manager.register_channel(hotkey_tx);
+
+        manager.register_hotkey(VKey::B, &[VKey::Control], || {
+            println!("[HOTKEY] Ctrl+B pressed!");
+            HotkeyCommand::ToggleSTT
+        }).unwrap();
+
+        let interrupt_handle = manager.interrupt_handle();
+
+        thread::spawn(move || {
+            manager.event_loop();
+        });
+
         Self {
             input_text: String::new(),
             chat_bubbles: Vec::new(),
@@ -650,9 +670,136 @@ impl ChatApp {
             transcription_tx: tx,
             transcription_rx: rx,
             last_repaint: Instant::now(),
-            // --- Initialize selected_voice ---
             selected_voice,
+            hotkey_interrupt_handle: Some(interrupt_handle),
+            hotkey_rx,
+            background_repaint_timer: Instant::now(),
+            shutting_down: false,
+            force_repaint_counter: 0,
         }
+    }
+
+    fn start_stt_recording(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.stt_active.store(true, Ordering::Relaxed);
+
+        let host = cpal::default_host();
+        let device = host.default_input_device().ok_or("No input device available")?;
+        println!("[AUDIO] Using device: {}", device.name().unwrap_or_else(|_| "Unknown".to_string()));
+
+        // Get the default input config
+        let config = device.default_input_config()?;
+
+        // Create the audio stream with proper error handling for background operation
+        let err_fn = move |err: cpal::StreamError| {
+            eprintln!("[AUDIO] Stream error: {}", err);
+        };
+
+        let target_rate = 16000;
+        let channels = config.channels() as usize;
+        let factor = (config.sample_rate().0 as f32 / target_rate as f32).round() as usize;
+        let factor = if factor < 1 { 1 } else { factor };
+
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: target_rate,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+
+        let _writer = hound::WavWriter::create(TEMP_AUDIO_FILE, spec)?;
+        let (sample_tx, sample_rx): (SyncSender<Vec<i16>>, _) = sync_channel(256);
+        self.audio_sample_tx = Some(sample_tx);
+
+        let spec_clone = spec;
+        let audio_thread = thread::spawn(move || {
+            let mut writer = hound::WavWriter::create(TEMP_AUDIO_FILE, spec_clone)
+                .expect("Failed to create WAV writer");
+            while let Ok(samples) = sample_rx.recv() {
+                for sample in samples {
+                    if let Err(e) = writer.write_sample(sample) {
+                        eprintln!("Error writing sample: {:?}", e);
+                    }
+                }
+            }
+            if let Err(e) = writer.finalize() {
+                eprintln!("Error finalizing WAV writer: {:?}", e);
+            }
+        });
+        self.audio_thread_handle = Some(audio_thread);
+
+        let stt_active = self.stt_active.clone();
+        let sample_tx_clone = self.audio_sample_tx.as_ref().unwrap().clone();
+
+        let stream = device.build_input_stream(
+            &config.into(),
+            move | data: &[i16], _: &cpal::InputCallbackInfo| {
+                if !stt_active.load(Ordering::Relaxed) {
+                    return;
+                }
+                let mut downsampled = Vec::with_capacity(data.len() / factor);
+                for (i, frame) in data.chunks(channels).enumerate() {
+                    if i % factor == 0 {
+                        if let Some(&s) = frame.get(0) {
+                            downsampled.push(s);
+                        }
+                    }
+                }
+                let _ = sample_tx_clone.try_send(downsampled);
+            },
+            err_fn,
+            None,
+        )?;
+
+        stream.play()?;
+        self.stt_stream = Some(stream);
+        self.stt_recording = true;
+        println!("[STT] Recording started");
+
+        Ok(())
+    }
+
+    fn stop_stt_recording(&mut self) {
+        self.stt_active.store(false, Ordering::Relaxed);
+        self.stt_stream = None;
+        self.audio_sample_tx = None;
+        if let Some(handle) = self.audio_thread_handle.take() {
+            let _ = handle.join();
+        }
+        self.stt_recording = false;
+        println!("[STT] Recording stopped");
+    }
+
+    fn stop_stt_recording_and_transcribe_heavy(&mut self) {
+        self.stop_stt_recording();
+
+        // Check if we actually have audio data before transcribing
+        let has_audio_data = if let Ok(metadata) = fs::metadata(TEMP_AUDIO_FILE) {
+            metadata.len() > 100 // WAV header is ~44 bytes, so >100 means actual audio data
+        } else {
+            false
+        };
+
+        if !has_audio_data {
+            println!("[STT] No audio data received, skipping transcription");
+            return;
+        }
+
+        let tx_clone = self.transcription_tx.clone();
+        tokio::spawn(async move {
+            let transcription_result =
+                tokio::task::spawn_blocking(move || heavy_transcribe(None)).await;
+            match transcription_result {
+                Ok(Ok(text)) => {
+                    tx_clone.send(text).expect("Failed to send transcription");
+                }
+                Ok(Err(e)) => {
+                    let _ = tx_clone.send(format!("Transcription error: {}", e));
+                }
+                Err(e) => {
+                    let _ = tx_clone.send(format!("Transcription join error: {:?}", e));
+                }
+            }
+        });
     }
 
     fn handle_file_upload(&mut self) {
@@ -677,7 +824,7 @@ impl ChatApp {
                 if ["png", "jpeg", "jpg", "webp", "gif"].contains(&ext.as_str()) {
                     if let Ok(metadata) = path.metadata() {
                         if metadata.len() > 20 * 1024 * 1024 {
-                            self.input_text.push_str("[Error: Image file too large (>20MB)]\n");
+                            self.input_text.push_str("[Error: Image file too large (>20MB)]");
                             return;
                         }
                     }
@@ -703,7 +850,7 @@ impl ChatApp {
                             }
                         }
                         Err(e) => {
-                            self.input_text.push_str(&format!("[Error: Failed to open image file: {}]\n", e));
+                            self.input_text.push_str(&format!("[Error: Failed to open image file: {}]", e));
                         }
                     }
                 } else {
@@ -727,12 +874,12 @@ impl ChatApp {
                             });
                         }
                         Err(e) => {
-                            self.input_text.push_str(&format!("[Error: Failed to read file: {}]\n", e));
+                            self.input_text.push_str(&format!("[Error: Failed to read file: {}]", e));
                         }
                     }
                 }
             } else {
-                self.input_text.push_str("[Error: File type not supported]\n");
+                self.input_text.push_str("[Error: File type not supported]");
             }
         }
     }
@@ -751,7 +898,6 @@ impl ChatApp {
             repeat_penalty: self.repeat_penalty,
             max_completion_tokens: self.max_completion_tokens,
             send_stt: self.send_stt,
-            // --- Add selected_voice to saved settings ---
             selected_voice: self.selected_voice.clone(),
         };
         save_app_settings(&updated_settings);
@@ -781,7 +927,7 @@ impl ChatApp {
                             { "type": "input_image", "image_url": { "url": attach } }
                         ])
                     } else {
-                        json!(format!("{}\n{}", bubble.content, attach))
+                        json!(format!("{}{}", bubble.content, attach))
                     }
                 } else {
                     json!(bubble.content.clone())
@@ -902,7 +1048,7 @@ impl ChatApp {
                 )
                 .await;
                 if experimental_reasoning {
-                    let re = regex::Regex::new(r"(?s)<think>(.*?)</think>").unwrap();
+                    let re = regex::Regex::new(r"(?s)<think> (.*?)</think>").unwrap();
                     if let Some(captures) = re.captures(&model_response.content) {
                         let extracted_reasoning = captures.get(1).unwrap().as_str().trim().to_owned();
                         model_response.reasoning = Some(extracted_reasoning);
@@ -930,100 +1076,6 @@ impl ChatApp {
                     save_memory(&*history);
                 }
                 process_tts(&model_response.content, &tts_enabled, tts_stop_flag);
-            }
-        });
-    }
-
-    fn start_stt_recording(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.stt_active.store(true, Ordering::Relaxed);
-        let host = cpal::default_host();
-        let device = host.default_input_device().ok_or("No input device available")?;
-        let config = device.default_input_config()?.config();
-        let target_rate = 16000;
-        let channels = config.channels as usize;
-        let factor = (config.sample_rate.0 as f32 / target_rate as f32).round() as usize;
-        let factor = if factor < 1 { 1 } else { factor };
-        let spec = hound::WavSpec {
-            channels: 1,
-            sample_rate: target_rate,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-        let _writer = hound::WavWriter::create(TEMP_AUDIO_FILE, spec)?;
-        let (sample_tx, sample_rx): (SyncSender<Vec<i16>>, _) = sync_channel(256);
-        self.audio_sample_tx = Some(sample_tx);
-        let spec_clone = spec;
-        let audio_thread = thread::spawn(move || {
-            let mut writer = hound::WavWriter::create(TEMP_AUDIO_FILE, spec_clone)
-                .expect("Failed to create WAV writer");
-            while let Ok(samples) = sample_rx.recv() {
-                for sample in samples {
-                    if let Err(e) = writer.write_sample(sample) {
-                        eprintln!("Error writing sample: {:?}", e);
-                    }
-                }
-            }
-            if let Err(e) = writer.finalize() {
-                eprintln!("Error finalizing WAV writer: {:?}", e);
-            }
-        });
-        self.audio_thread_handle = Some(audio_thread);
-        let stt_active = self.stt_active.clone();
-        let err_fn = move |err| {
-            eprintln!("an error occurred on stream: {}", err);
-        };
-        let sample_tx_clone = self.audio_sample_tx.as_ref().unwrap().clone();
-        let stream = device.build_input_stream(
-            &config,
-            move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                if !stt_active.load(Ordering::Relaxed) {
-                    return;
-                }
-                let mut downsampled = Vec::with_capacity(data.len() / factor);
-                for (i, frame) in data.chunks(channels).enumerate() {
-                    if i % factor == 0 {
-                        if let Some(&s) = frame.get(0) {
-                            downsampled.push(s);
-                        }
-                    }
-                }
-                let _ = sample_tx_clone.try_send(downsampled);
-            },
-            err_fn,
-            None,
-        )?;
-        stream.play()?;
-        self.stt_stream = Some(stream);
-        self.stt_recording = true;
-        Ok(())
-    }
-
-    fn stop_stt_recording(&mut self) {
-        self.stt_active.store(false, Ordering::Relaxed);
-        self.stt_stream = None;
-        self.audio_sample_tx = None;
-        if let Some(handle) = self.audio_thread_handle.take() {
-            let _ = handle.join();
-        }
-        self.stt_recording = false;
-    }
-
-    fn stop_stt_recording_and_transcribe_heavy(&mut self) {
-        self.stop_stt_recording();
-        let tx_clone = self.transcription_tx.clone();
-        tokio::spawn(async move {
-            let transcription_result =
-                tokio::task::spawn_blocking(move || heavy_transcribe(None)).await;
-            match transcription_result {
-                Ok(Ok(text)) => {
-                    tx_clone.send(text).expect("Failed to send transcription");
-                }
-                Ok(Err(e)) => {
-                    let _ = tx_clone.send(format!("Transcription error: {}", e));
-                }
-                Err(e) => {
-                    let _ = tx_clone.send(format!("Transcription join error: {:?}", e));
-                }
             }
         });
     }
@@ -1086,9 +1138,7 @@ impl ChatApp {
                 });
                 ui.horizontal(|ui| {
                     let stt_btn_text = if self.stt_recording { "Stop" } else { "STT" };
-                    if ui.button(stt_btn_text).clicked()
-                        || ui.input(|i| i.key_pressed(egui::Key::Backtick))
-                    {
+                    if ui.button(stt_btn_text).clicked() {
                         if self.stt_recording {
                             self.stop_stt_recording_and_transcribe_heavy();
                         } else {
@@ -1118,7 +1168,6 @@ impl ChatApp {
             let mut streaming_enabled_val = self.streaming_enabled;
             let mut send_stt_val = self.send_stt;
             let mut selected_model = self.selected_model.clone();
-            // --- Add selected_voice variable ---
             let mut selected_voice = self.selected_voice.clone();
             let mut changed = false;
             egui::Window::new("Settings")
@@ -1203,7 +1252,6 @@ impl ChatApp {
                         changed = true;
                     }
                     ui.separator();
-                    // --- Add TTS Voice Dropdown ---
                     ui.label("TTS Voice:");
                     egui::ComboBox::from_label("Voice")
                         .selected_text(&selected_voice)
@@ -1292,12 +1340,9 @@ impl ChatApp {
                 self.streaming_enabled = streaming_enabled_val;
                 self.send_stt = send_stt_val;
                 self.selected_model = selected_model;
-                // --- Handle selected_voice change ---
                 if self.selected_voice != selected_voice {
                     self.selected_voice = selected_voice.clone();
-                    // --- Update the global static variable ---
                     *SELECTED_VOICE_PATH.lock().unwrap() = selected_voice.clone();
-                    // --- Mark TTS model as unloaded to trigger reload with new voice ---
                     TTS_MODEL_LOADED.store(false, Ordering::Relaxed);
                 }
                 self.api_url = self.temp_api_url.clone();
@@ -1359,6 +1404,22 @@ impl ChatApp {
     }
 
     fn update_app(&mut self, ctx: &egui::Context) {
+        // Handle hotkey commands first
+        while let Ok(command) = self.hotkey_rx.try_recv() {
+            match command {
+                HotkeyCommand::ToggleSTT => {
+                    if self.stt_recording {
+                        self.stop_stt_recording_and_transcribe_heavy();
+                    } else {
+                        if let Err(e) = self.start_stt_recording() {
+                            eprintln!("STT error (from hotkey): {:?}", e);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Process transcription results
         while let Ok(new_text) = self.transcription_rx.try_recv() {
             if self.send_stt && !new_text.trim().is_empty() {
                 self.input_text = new_text;
@@ -1368,6 +1429,8 @@ impl ChatApp {
                 self.input_text = new_text;
             }
         }
+
+        // Clean up system messages
         self.chat_bubbles.retain(|bubble| {
             if bubble.sender == Sender::System {
                 bubble.timestamp.map(|ts| ts.elapsed() < Duration::from_secs(1)).unwrap_or(true)
@@ -1375,12 +1438,28 @@ impl ChatApp {
                 true
             }
         });
+
+        // Update UI components
         self.update_top_panel(ctx);
         self.update_input_panel(ctx);
         self.update_settings_window(ctx);
         self.update_chat_area(ctx);
         self.process_conversation_channels();
         self.rebuild_conversation_history();
+
+        // Force repaints even when the app is in background
+        if self.background_repaint_timer.elapsed() > Duration::from_millis(100) {
+            ctx.request_repaint();
+            self.background_repaint_timer = Instant::now();
+        }
+
+        // Additional force repaint counter for background operation
+        self.force_repaint_counter = self.force_repaint_counter.wrapping_add(1);
+        if self.force_repaint_counter % 5 == 0 {
+            ctx.request_repaint();
+        }
+
+        // Normal repaint conditions
         if self.last_repaint.elapsed() > Duration::from_millis(16)
             || self.scroll_to_bottom
             || !self.conversation_channels.is_empty()
@@ -1391,7 +1470,6 @@ impl ChatApp {
         }
     }
 }
-
 fn render_chat_bubble(ui: &mut egui::Ui, bubble: &ChatBubble, index: usize, app: &mut ChatApp) {
     let bubble_color = match bubble.sender {
         Sender::User => egui::Color32::from_rgb(53, 51, 54),
@@ -1445,24 +1523,50 @@ fn render_chat_bubble(ui: &mut egui::Ui, bubble: &ChatBubble, index: usize, app:
         });
     });
 }
-
 impl eframe::App for ChatApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_app(ctx);
+
+        // CRITICAL: Force repaints even when app is in background
+        ctx.request_repaint_after(Duration::from_millis(100));
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Set shutdown flag
+        self.shutting_down = true;
+
+        // First, stop any active TTS
         self.tts_stop_flag.store(true, Ordering::Relaxed);
-        if self.stt_active.compare_exchange(true, false, Ordering::Acquire, Ordering::Relaxed).is_ok() {
-            self.stop_stt_recording(); 
+
+        // Stop STT if it's active
+        if self.stt_active.load(Ordering::Relaxed) {
+            self.stop_stt_recording();
         }
-        std::thread::sleep(Duration::from_millis(200));
+
+        // Properly shut down the hotkey manager
+        if let Some(handle) = self.hotkey_interrupt_handle.take() {
+            handle.interrupt();
+
+            // Give the hotkey manager time to shut down
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        // Save settings one last time
+        self.save_settings();
+
+        // Save memory one last time
+        save_memory(&*self.conversation_history.lock().unwrap());
     }
 }
-
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_active(true)
+            .with_decorations(true)
+            .with_resizable(true)
+            .with_transparent(false)
+            .with_min_inner_size(egui::vec2(320.0, 240.0)),
         ..Default::default()
     };
     let chat_app = ChatApp::new();
