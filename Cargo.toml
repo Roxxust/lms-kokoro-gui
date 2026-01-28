@@ -1,6 +1,6 @@
 [package]
 name = "kokoro"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2024"
 
 [dependencies]
@@ -15,7 +15,7 @@ openai-api-rs = "6.0.0"
 bincode = { version = "2.0.1", features = ["serde"] }
 syntect = "5.0"
 tts = "0.26.3"
-simple_transcribe_rs = "1.0.1"
+simple_transcribe_rs = "1.0.4"
 cpal = "0.15.3"
 hound = "3.5.1"
 rfd = "0.15.3"
@@ -28,6 +28,10 @@ ort = "2.0.0-rc.9"
 once_cell = "1.17.1"
 pin-project = "1.1.9"
 
+win-hotkeys = "0.5.1"
+
+crossbeam-channel = "0.5.15"
+
 lazy_static = "1.4.0"
 rustfft = "6.2"
 num-complex = "0.4"
@@ -36,3 +40,4 @@ regex = "1.11.1"
 rodio = { version = "0.20.1", default-features = false, features = ["wav"] }
 anyhow = "1.0.98"
 # $env:LIBCLANG_PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\x64\lib"
+# $env:CMAKE_PREFIX_PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake"
