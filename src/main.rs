@@ -1,13 +1,25 @@
+//#![windows_subsystem = "windows"]
 use eframe::egui;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound;
-use std::{collections::{hash_map::DefaultHasher, HashMap},fs,hash::{Hash, Hasher},io::Read,process::{Command, Stdio},sync::{atomic::{AtomicBool, Ordering},mpsc::{self, SyncSender, sync_channel},Arc, Mutex},thread,time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
+    fs,
+    hash::{Hash, Hasher},
+    process::{Command, Stdio},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, SyncSender, sync_channel},
+        Arc, Mutex,
+    },
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use bincode::serde::{encode_to_vec, decode_from_slice};
-use bincode::config;
+use bitcode::{Encode, Decode};
 use ndarray::{Array, Ix2};
 use ort::inputs;
 use std::sync::LazyLock;
@@ -25,23 +37,39 @@ use base64::{engine::general_purpose, Engine};
 use crate::tts::{process_tts, AVAILABLE_VOICES};
 use win_hotkeys::{HotkeyManager, VKey, InterruptHandle};
 use crossbeam_channel::{unbounded, Receiver};
+
 pub mod heteronyms;
 pub mod tts;
 pub mod contractions;
+
 const SETTINGS_FILE: &str = "settings.json";
 const MEMORY_FILE: &str = "memory.bin";
 const TEMP_AUDIO_FILE: &str = "temp_audio.wav";
 const TTS_MODEL_PATH: &str = "onnx/modelv1.onnx";
 const TTS_CMU_DICT_PATH: &str = "cmudict.dict";
 const TTS_TOKENIZER_PATH: &str = "tokenizer.json";
+// === FIX: Limit conversation channels to prevent memory accumulation ===
+const MAX_CONVERSATION_CHANNELS: usize = 2;
+
 static TTS_MODEL_LOADED: AtomicBool = AtomicBool::new(false);
-static SELECTED_VOICE_PATH: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("af_bella.bin".to_string()));
+static SELECTED_VOICE_PATH: Lazy<Mutex<String>> =
+    Lazy::new(|| Mutex::new("af_bella.bin".to_string()));
+
+#[derive(Clone, Serialize, Deserialize, Encode, Decode)]
+struct ConversationMessage {
+    role: String,
+    content: String,
+    id: String,
+    attachment_content: Option<String>,
+}
+
 #[derive(Clone, PartialEq)]
 enum Sender {
     User,
     Model,
     System,
 }
+
 #[derive(Clone)]
 struct ChatBubble {
     content: String,
@@ -54,11 +82,13 @@ struct ChatBubble {
     timestamp: Option<Instant>,
     persistent: bool,
 }
+
 enum BubbleMessage {
     New(ChatBubble),
     Update { id: egui::Id, content: String },
     Remove(egui::Id),
 }
+
 #[derive(Serialize, Deserialize)]
 struct AppSettings {
     api_url: String,
@@ -75,6 +105,7 @@ struct AppSettings {
     send_stt: bool,
     selected_voice: String,
 }
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -94,49 +125,84 @@ impl Default for AppSettings {
         }
     }
 }
+
 fn unique_id(prefix: &str, content: &str) -> egui::Id {
     let mut hasher = DefaultHasher::new();
     content.hash(&mut hasher);
     let hash = hasher.finish();
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     egui::Id::new(format!("{}-{}-{}", prefix, now, hash))
 }
-fn save_memory(memory: &Vec<Value>) {
-    if let Ok(serialized) = encode_to_vec(memory, config::standard()) {
-        let _ = fs::write(MEMORY_FILE, serialized);
+
+fn save_memory(memory: &Vec<ConversationMessage>) {
+    let serialized = bitcode::encode(memory);
+    if let Err(e) = fs::write(MEMORY_FILE, serialized) {
+        eprintln!("[MEMORY] Failed to write memory file: {}", e);
+    } else {
+        eprintln!(
+            "[MEMORY] Saved {} messages to {}",
+            memory.len(),
+            MEMORY_FILE
+        );
     }
 }
-fn load_memory() -> Vec<Value> {
-    if let Ok(data) = fs::read(MEMORY_FILE) {
-        if let Ok((mem_vec, _)) =
-            decode_from_slice::<Vec<Value>, _>(&data, config::standard())
-        {
-            return mem_vec;
+
+fn load_memory() -> Vec<ConversationMessage> {
+    match fs::read(MEMORY_FILE) {
+        Ok(data) => {
+            if data.is_empty() {
+                eprintln!("[MEMORY] Memory file is empty, starting fresh");
+                return vec![];
+            }
+            match bitcode::decode::<Vec<ConversationMessage>>(&data) {
+                Ok(mem_vec) => {
+                    eprintln!(
+                        "[MEMORY] Loaded {} messages from {}",
+                        mem_vec.len(),
+                        MEMORY_FILE
+                    );
+                    mem_vec
+                }
+                Err(e) => {
+                    eprintln!("[MEMORY] Failed to decode memory file: {}", e);
+                    eprintln!("[MEMORY] File size: {} bytes", data.len());
+                    vec![]
+                }
+            }
+        }
+        Err(_) => {
+            eprintln!("[MEMORY] No existing memory file found, starting fresh");
+            vec![]
         }
     }
-    vec![serde_json::json!({"role":"system", "content": "You are an AI companion.", "id":"system-0"})]
 }
+
 fn save_app_settings(settings: &AppSettings) {
     if let Ok(json_str) = serde_json::to_string_pretty(settings) {
         let _ = fs::write(SETTINGS_FILE, json_str);
     }
 }
+
 fn load_app_settings() -> AppSettings {
-    if let Ok(mut file) = fs::File::open(SETTINGS_FILE) {
-        let mut contents = String::new();
-        if file.read_to_string(&mut contents).is_ok() {
-            if let Ok(s) = serde_json::from_str::<AppSettings>(&contents) {
-                return s;
-            }
+    if let Ok(contents) = fs::read_to_string(SETTINGS_FILE) {
+        if let Ok(s) = serde_json::from_str(&contents) {
+            return s;
         }
     }
     AppSettings::default()
 }
+
 fn render_markdown(ui: &mut egui::Ui, markdown: &str) {
     for line in markdown.lines() {
-        ui.add(egui::Label::new(egui::RichText::new(line).color(egui::Color32::WHITE)).wrap());
+        ui.add(
+            egui::Label::new(egui::RichText::new(line).color(egui::Color32::WHITE)).wrap(),
+        );
     }
 }
+
 fn render_collapsible_bubble<F: FnOnce(&mut egui::Ui)>(
     ui: &mut egui::Ui,
     label: &str,
@@ -149,6 +215,7 @@ fn render_collapsible_bubble<F: FnOnce(&mut egui::Ui)>(
             render_content(ui);
         });
 }
+
 fn highlight_code_job(code: &str, language: Option<&str>) -> egui::text::LayoutJob {
     use egui::{Color32, FontId, TextFormat};
     let ps = SyntaxSet::load_defaults_newlines();
@@ -157,7 +224,8 @@ fn highlight_code_job(code: &str, language: Option<&str>) -> egui::text::LayoutJ
         ps.find_syntax_by_token(lang)
             .unwrap_or_else(|| ps.find_syntax_by_extension("rs").unwrap_or_else(|| ps.find_syntax_plain_text()))
     } else {
-        ps.find_syntax_by_extension("rs").unwrap_or_else(|| ps.find_syntax_plain_text())
+        ps.find_syntax_by_extension("rs")
+            .unwrap_or_else(|| ps.find_syntax_plain_text())
     };
     let mut h = HighlightLines::new(syntax, &ts.themes["base16-ocean.dark"]);
     let mut job = egui::text::LayoutJob::default();
@@ -165,18 +233,59 @@ fn highlight_code_job(code: &str, language: Option<&str>) -> egui::text::LayoutJ
     for line in code.lines() {
         if let Ok(ranges) = h.highlight_line(line, &ps) {
             for (style, text) in ranges {
-                let color = Color32::from_rgb(style.foreground.r, style.foreground.g, style.foreground.b);
-                job.append(text, 0.0, TextFormat { font_id: font.clone(), color, ..Default::default() });
+                let color = Color32::from_rgb(
+                    style.foreground.r,
+                    style.foreground.g,
+                    style.foreground.b,
+                );
+                job.append(
+                    text,
+                    0.0,
+                    TextFormat {
+                        font_id: font.clone(),
+                        color,
+                        ..Default::default()
+                    },
+                );
             }
-            job.append("", 0.0, TextFormat { font_id: font.clone(), color: Color32::WHITE, ..Default::default() });
+            job.append(
+                "\n",
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: Color32::WHITE,
+                    ..Default::default()
+                },
+            );
         } else {
-            job.append(line, 0.0, TextFormat { font_id: font.clone(), color: Color32::WHITE, ..Default::default() });
-            job.append("", 0.0, TextFormat { font_id: font.clone(), color: Color32::WHITE, ..Default::default() });
+            job.append(
+                line,
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: Color32::WHITE,
+                    ..Default::default()
+                },
+            );
+            job.append(
+                "\n",
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: Color32::WHITE,
+                    ..Default::default()
+                },
+            );
         }
     }
     job
 }
-fn split_content_into_bubbles(sender: Sender, content: &str, is_thinking: bool) -> Vec<ChatBubble> {
+
+fn split_content_into_bubbles(
+    sender: Sender,
+    content: &str,
+    is_thinking: bool,
+) -> Vec<ChatBubble> {
     let mut bubbles = Vec::new();
     let mut remaining = content;
     while let Some(start) = remaining.find("```") {
@@ -234,7 +343,7 @@ fn split_content_into_bubbles(sender: Sender, content: &str, is_thinking: bool) 
                 timestamp: None,
                 persistent: true,
             });
-            remaining = "";
+            remaining = " ";
             break;
         }
     }
@@ -253,11 +362,12 @@ fn split_content_into_bubbles(sender: Sender, content: &str, is_thinking: bool) 
     }
     bubbles
 }
+
 fn strip_code_blocks(text: &str) -> String {
     let mut result = String::new();
     let mut in_code = false;
     for line in text.lines() {
-        if line.trim().starts_with("```") {
+        if line.trim().starts_with("`") {
             in_code = !in_code;
             continue;
         }
@@ -268,11 +378,18 @@ fn strip_code_blocks(text: &str) -> String {
     }
     result
 }
-fn send_bubbles(tx: &UnboundedSender<BubbleMessage>, sender: Sender, content: &str, is_thinking: bool) {
+
+fn send_bubbles(
+    tx: &UnboundedSender<BubbleMessage>,
+    sender: Sender,
+    content: &str,
+    is_thinking: bool,
+) {
     for bubble in split_content_into_bubbles(sender, content, is_thinking) {
         let _ = tx.send(BubbleMessage::New(bubble));
     }
 }
+
 fn send_reasoning(tx: &UnboundedSender<BubbleMessage>, sender: Sender, reasoning: &str) {
     if reasoning.trim().is_empty() {
         return;
@@ -290,6 +407,7 @@ fn send_reasoning(tx: &UnboundedSender<BubbleMessage>, sender: Sender, reasoning
     };
     let _ = tx.send(BubbleMessage::New(bubble));
 }
+
 async fn call_model(
     client: &Client,
     api_url: &str,
@@ -337,6 +455,7 @@ async fn call_model(
         },
     }
 }
+
 async fn call_model_streaming(
     client: &Client,
     api_url: &str,
@@ -352,7 +471,7 @@ async fn call_model_streaming(
     tx: UnboundedSender<BubbleMessage>,
     tts_enabled: Arc<AtomicBool>,
     tts_stop_flag: Arc<AtomicBool>,
-    history_arc: Arc<Mutex<Vec<Value>>>,
+    history_arc: Arc<Mutex<Vec<ConversationMessage>>>,
 ) {
     let payload = json!({
         "model": model,
@@ -376,7 +495,7 @@ async fn call_model_streaming(
                 is_thinking: false,
                 is_code: false,
                 language: None,
-                id: unique_id("bubble", ""),
+                id: unique_id("bubble", " "),
                 timestamp: None,
                 persistent: true,
             }));
@@ -385,42 +504,37 @@ async fn call_model_streaming(
     };
     let mut accumulated_content = String::new();
     let mut accumulated_reasoning = String::new();
-    let content_bubble_id = unique_id("stream_content", "");
-    let reasoning_bubble_id = unique_id("stream_reasoning", "");
+    let content_bubble_id = unique_id("stream_content", " ");
+    let reasoning_bubble_id = unique_id("stream_reasoning", " ");
     let mut content_created = false;
     let mut reasoning_created = false;
     let mut leftover = String::new();
-
-    // CRITICAL FIX: Properly handle Server-Sent Events (SSE) format
     while let Ok(Some(chunk)) = response.chunk().await {
         let chunk_str = String::from_utf8_lossy(&chunk).to_string();
         leftover.push_str(&chunk_str);
-
-        // Process each complete event in the chunk
-        while let Some(pos) = leftover.find("\n\n") {
+        while let Some(pos) = leftover.find("\n") {
             let event = leftover[..pos].to_string();
             leftover = leftover[pos + 2..].to_string();
-
-            // Parse the event data
+            if event.contains("event: error") {
+                continue;
+            }
             let mut data = String::new();
             for line in event.lines() {
-                if line.starts_with("data: ") {
+                if line.starts_with("data: ") && line.len() > 6 {
                     data = line[6..].to_string();
                     break;
                 }
             }
-
             if data.is_empty() || data == "[DONE]" {
                 continue;
             }
-
-            // Process the JSON data
             if let Ok(json_val) = serde_json::from_str::<Value>(&data) {
                 if let Some(choices) = json_val.get("choices").and_then(|c| c.as_array()) {
                     for choice in choices {
                         if let Some(delta) = choice.get("delta") {
-                            // Process reasoning content if present
-                            if let Some(reasoning) = delta.get("reasoning_content").and_then(|r| r.as_str()) {
+                            if let Some(reasoning) =
+                                delta.get("reasoning_content").and_then(|r| r.as_str())
+                            {
                                 accumulated_reasoning.push_str(reasoning);
                                 if !accumulated_reasoning.trim().is_empty() {
                                     if !reasoning_created {
@@ -444,9 +558,9 @@ async fn call_model_streaming(
                                     }
                                 }
                             }
-
-                            // Process content if present
-                            if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+                            if let Some(content) =
+                                delta.get("content").and_then(|c| c.as_str())
+                            {
                                 accumulated_content.push_str(content);
                                 if !accumulated_content.trim().is_empty() {
                                     if !content_created {
@@ -476,61 +590,31 @@ async fn call_model_streaming(
             }
         }
     }
-
-    // Process any remaining data
-    if !leftover.is_empty() {
-        let mut data = String::new();
-        for line in leftover.lines() {
-            if line.starts_with("data: ") {
-                data = line[6..].to_string();
-                break;
-            }
-        }
-
-        if !data.is_empty() && data != "[DONE]" {
-            if let Ok(json_val) = serde_json::from_str::<Value>(&data) {
-                if let Some(choices) = json_val.get("choices").and_then(|c| c.as_array()) {
-                    for choice in choices {
-                        if let Some(delta) = choice.get("delta") {
-                            if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                                accumulated_content.push_str(content);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Clean up and finalize
     accumulated_content = accumulated_content.trim_start().to_owned();
     let _ = tx.send(BubbleMessage::Remove(content_bubble_id));
     let _ = tx.send(BubbleMessage::Remove(reasoning_bubble_id));
-
     if !accumulated_reasoning.trim().is_empty() {
         send_reasoning(&tx, Sender::Model, accumulated_reasoning.trim());
     }
-
     if !accumulated_content.trim().is_empty() {
         send_bubbles(&tx, Sender::Model, accumulated_content.trim(), false);
-
-        // Save to history
         let mut history = history_arc.lock().unwrap();
-        history.push(json!({
-            "role": "assistant",
-            "content": accumulated_content.trim(),
-            "id": format!("{:?}", content_bubble_id)
-        }));
+        history.push(ConversationMessage {
+            role: "assistant".to_string(),
+            content: accumulated_content.trim().to_string(),
+            id: format!("{:?}", content_bubble_id),
+            attachment_content: None,
+        });
         save_memory(&*history);
-
-        // Process TTS
         process_tts(&accumulated_content, &tts_enabled, tts_stop_flag);
     }
 }
+
 struct ModelResponse {
     content: String,
     reasoning: Option<String>,
 }
+
 fn load_model(selected_model: &str) {
     Command::new("lms")
         .arg("load")
@@ -539,6 +623,7 @@ fn load_model(selected_model: &str) {
         .spawn()
         .expect("Failed to load model");
 }
+
 fn unload_model(selected_model: &str) {
     Command::new("lms")
         .arg("unload")
@@ -547,15 +632,18 @@ fn unload_model(selected_model: &str) {
         .spawn()
         .expect("Failed to unload model");
 }
+
 fn heavy_transcribe(
     _stt_writer: Option<Arc<Mutex<Option<hound::WavWriter<std::io::BufWriter<fs::File>>>>>>,
 ) -> Result<String, String> {
     eprintln!("heavy_transcribe: Starting transcription...");
     let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
     let join_handle = rt.spawn_blocking(move || {
-        let model_handler = block_on(ModelHandler::new("small", "models/")); // tiny, base, small, medium, large.
+        let model_handler = block_on(ModelHandler::new("small", "models/"));
         let transcriber = Transcriber::new(model_handler);
-        transcriber.transcribe(TEMP_AUDIO_FILE, None).map_err(|e| e.to_string())
+        transcriber
+            .transcribe(TEMP_AUDIO_FILE, None)
+            .map_err(|e| e.to_string())
     });
     let result = rt.block_on(join_handle).map_err(|e| e.to_string())??;
     eprintln!("heavy_transcribe: Removing temporary file...");
@@ -564,13 +652,69 @@ fn heavy_transcribe(
     eprintln!("heavy_transcribe: Transcribed text: {}", text);
     Ok(text)
 }
+
 enum HotkeyCommand {
     ToggleSTT,
 }
+
+// === CRITICAL FIX: HotkeyResources struct to control drop order ===
+struct HotkeyResources {
+    receiver: Option<Receiver<HotkeyCommand>>,
+    interrupt_handle: Option<InterruptHandle>,
+    thread_handle: Option<thread::JoinHandle<()>>,
+}
+
+impl HotkeyResources {
+    fn new() -> Self {
+        let mut manager = HotkeyManager::new();
+        let (hotkey_tx, hotkey_rx) = unbounded();
+        manager.register_channel(hotkey_tx);
+        manager
+            .register_hotkey(VKey::B, &[VKey::Control], || {
+                println!("[HOTKEY] Ctrl+B pressed!");
+                HotkeyCommand::ToggleSTT
+            })
+            .unwrap();
+
+        let interrupt_handle = manager.interrupt_handle();
+
+        let thread_handle = thread::spawn(move || {
+            manager.event_loop();
+        });
+
+        Self {
+            receiver: Some(hotkey_rx),
+            interrupt_handle: Some(interrupt_handle),
+            thread_handle: Some(thread_handle),
+        }
+    }
+
+    fn shutdown(&mut self) {
+        // 1. Interrupt first (while receiver still exists)
+        if let Some(handle) = self.interrupt_handle.take() {
+            let _ = handle.interrupt();
+        }
+        // 2. Join thread (wait for it to exit)
+        if let Some(thread) = self.thread_handle.take() {
+            let _ = thread.join();
+        }
+        // 3. Receiver drops LAST
+        self.receiver = None;
+    }
+
+    fn try_recv(&self) -> Result<HotkeyCommand, crossbeam_channel::TryRecvError> {
+        if let Some(ref rx) = self.receiver {
+            rx.try_recv()
+        } else {
+            Err(crossbeam_channel::TryRecvError::Disconnected)
+        }
+    }
+}
+
 struct ChatApp {
     input_text: String,
     chat_bubbles: Vec<ChatBubble>,
-    conversation_history: Arc<Mutex<Vec<Value>>>,
+    conversation_history: Arc<Mutex<Vec<ConversationMessage>>>,
     client: Client,
     api_url: String,
     selected_model: String,
@@ -587,8 +731,10 @@ struct ChatApp {
     experimental_reasoning: bool,
     scroll_to_bottom: bool,
     show_settings: bool,
+    show_image_selector: bool,
     temp_api_url: String,
     new_model_name: String,
+    // === FIX: Limit conversation channels to prevent memory accumulation ===
     conversation_channels: Vec<UnboundedReceiver<BubbleMessage>>,
     editing_bubble: Option<usize>,
     input_panel_height: f32,
@@ -604,12 +750,16 @@ struct ChatApp {
     transcription_rx: mpsc::Receiver<String>,
     last_repaint: Instant,
     selected_voice: String,
-    hotkey_interrupt_handle: Option<InterruptHandle>,
-    hotkey_rx: Receiver<HotkeyCommand>,
+    hotkey_resources: Option<HotkeyResources>,
     background_repaint_timer: Instant,
-    shutting_down: bool,
     force_repaint_counter: u32,
+    history_dirty: bool,
+    uploaded_images: HashMap<egui::Id, Vec<u8>>,
+    uploaded_documents: HashMap<egui::Id, (String, String)>,
+    selected_image_ids: Vec<egui::Id>,
+    selected_document_ids: Vec<egui::Id>,
 }
+
 impl ChatApp {
     fn new() -> Self {
         let settings = load_app_settings();
@@ -617,27 +767,15 @@ impl ChatApp {
         let selected_voice = settings.selected_voice.clone();
         *SELECTED_VOICE_PATH.lock().unwrap() = selected_voice.clone();
 
-        let mut manager = HotkeyManager::new();
+        let hotkey_resources = Some(HotkeyResources::new());
 
-        let (hotkey_tx, hotkey_rx) = unbounded();
+        let saved_history = load_memory();
+        let conversation_history = Arc::new(Mutex::new(saved_history));
 
-        manager.register_channel(hotkey_tx);
-
-        manager.register_hotkey(VKey::B, &[VKey::Control], || {
-            println!("[HOTKEY] Ctrl+B pressed!");
-            HotkeyCommand::ToggleSTT
-        }).unwrap();
-
-        let interrupt_handle = manager.interrupt_handle();
-
-        thread::spawn(move || {
-            manager.event_loop();
-        });
-
-        Self {
+        let mut app = Self {
             input_text: String::new(),
             chat_bubbles: Vec::new(),
-            conversation_history: Arc::new(Mutex::new(load_memory())),
+            conversation_history,
             client: Client::new(),
             api_url: settings.api_url.clone(),
             selected_model: settings.selected_model.clone(),
@@ -654,6 +792,7 @@ impl ChatApp {
             experimental_reasoning: true,
             scroll_to_bottom: false,
             show_settings: false,
+            show_image_selector: false,
             temp_api_url: settings.api_url.clone(),
             new_model_name: String::new(),
             conversation_channels: Vec::new(),
@@ -671,49 +810,99 @@ impl ChatApp {
             transcription_rx: rx,
             last_repaint: Instant::now(),
             selected_voice,
-            hotkey_interrupt_handle: Some(interrupt_handle),
-            hotkey_rx,
+            hotkey_resources,
             background_repaint_timer: Instant::now(),
-            shutting_down: false,
             force_repaint_counter: 0,
+            history_dirty: false,
+            uploaded_images: HashMap::new(),
+            uploaded_documents: HashMap::new(),
+            selected_image_ids: Vec::new(),
+            selected_document_ids: Vec::new(),
+        };
+        app.load_history_into_bubbles();
+        app
+    }
+
+    fn load_history_into_bubbles(&mut self) {
+        let history = self.conversation_history.lock().unwrap();
+        eprintln!(
+            "[HISTORY] Loading {} messages into bubbles",
+            history.len()
+        );
+        for item in history.iter() {
+            if item.role == "system" {
+                continue;
+            }
+            let sender = match item.role.as_str() {
+                "user" => Sender::User,
+                "assistant" => Sender::Model,
+                _ => continue,
+            };
+            let bubble_id = egui::Id::new(&item.id);
+            let attachment_content = if item
+                .attachment_content
+                .as_ref()
+                .map_or(false, |a| a.starts_with("data:image"))
+            {
+                if let Some(base64_data) = item.attachment_content.as_ref().and_then(|a| a.split(',').nth(1)) {
+                    if let Ok(image_bytes) = general_purpose::STANDARD.decode(base64_data) {
+                        self.uploaded_images.insert(bubble_id, image_bytes);
+                    }
+                }
+                item.attachment_content.clone()
+            } else if item.attachment_content.is_some() && !item.attachment_content.as_ref().unwrap().starts_with("[Upload:") {
+                self.uploaded_documents.insert(bubble_id, ("restored_file".to_string(), item.attachment_content.clone().unwrap()));
+                item.attachment_content.clone()
+            } else {
+                None
+            };
+            self.chat_bubbles.push(ChatBubble {
+                content: item.content.to_string(),
+                attachment_content,
+                sender,
+                is_thinking: false,
+                is_code: false,
+                language: None,
+                id: bubble_id,
+                timestamp: None,
+                persistent: true,
+            });
         }
+        eprintln!("[HISTORY] Loaded {} bubbles", self.chat_bubbles.len());
     }
 
     fn start_stt_recording(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.stt_active.store(true, Ordering::Relaxed);
-
         let host = cpal::default_host();
-        let device = host.default_input_device().ok_or("No input device available")?;
-        println!("[AUDIO] Using device: {}", device.name().unwrap_or_else(|_| "Unknown".to_string()));
-
-        // Get the default input config
+        let device = host
+            .default_input_device()
+            .ok_or("No input device available")?;
+        println!(
+            "[AUDIO] Using device: {}",
+            device.name().unwrap_or_else(|_| "Unknown".to_string())
+        );
         let config = device.default_input_config()?;
-
-        // Create the audio stream with proper error handling for background operation
         let err_fn = move |err: cpal::StreamError| {
             eprintln!("[AUDIO] Stream error: {}", err);
         };
-
         let target_rate = 16000;
         let channels = config.channels() as usize;
         let factor = (config.sample_rate().0 as f32 / target_rate as f32).round() as usize;
         let factor = if factor < 1 { 1 } else { factor };
-
         let spec = hound::WavSpec {
             channels: 1,
             sample_rate: target_rate,
             bits_per_sample: 16,
             sample_format: hound::SampleFormat::Int,
         };
-
         let _writer = hound::WavWriter::create(TEMP_AUDIO_FILE, spec)?;
         let (sample_tx, sample_rx): (SyncSender<Vec<i16>>, _) = sync_channel(256);
         self.audio_sample_tx = Some(sample_tx);
-
         let spec_clone = spec;
         let audio_thread = thread::spawn(move || {
-            let mut writer = hound::WavWriter::create(TEMP_AUDIO_FILE, spec_clone)
-                .expect("Failed to create WAV writer");
+            let mut writer =
+                hound::WavWriter::create(TEMP_AUDIO_FILE, spec_clone)
+                    .expect("Failed to create WAV writer");
             while let Ok(samples) = sample_rx.recv() {
                 for sample in samples {
                     if let Err(e) = writer.write_sample(sample) {
@@ -726,13 +915,11 @@ impl ChatApp {
             }
         });
         self.audio_thread_handle = Some(audio_thread);
-
         let stt_active = self.stt_active.clone();
         let sample_tx_clone = self.audio_sample_tx.as_ref().unwrap().clone();
-
         let stream = device.build_input_stream(
             &config.into(),
-            move | data: &[i16], _: &cpal::InputCallbackInfo| {
+            move |data: &[i16], _: &cpal::InputCallbackInfo| {
                 if !stt_active.load(Ordering::Relaxed) {
                     return;
                 }
@@ -749,12 +936,10 @@ impl ChatApp {
             err_fn,
             None,
         )?;
-
         stream.play()?;
         self.stt_stream = Some(stream);
         self.stt_recording = true;
         println!("[STT] Recording started");
-
         Ok(())
     }
 
@@ -771,19 +956,15 @@ impl ChatApp {
 
     fn stop_stt_recording_and_transcribe_heavy(&mut self) {
         self.stop_stt_recording();
-
-        // Check if we actually have audio data before transcribing
         let has_audio_data = if let Ok(metadata) = fs::metadata(TEMP_AUDIO_FILE) {
-            metadata.len() > 100 // WAV header is ~44 bytes, so >100 means actual audio data
+            metadata.len() > 100
         } else {
             false
         };
-
         if !has_audio_data {
             println!("[STT] No audio data received, skipping transcription");
             return;
         }
-
         let tx_clone = self.transcription_tx.clone();
         tokio::spawn(async move {
             let transcription_result =
@@ -796,7 +977,8 @@ impl ChatApp {
                     let _ = tx_clone.send(format!("Transcription error: {}", e));
                 }
                 Err(e) => {
-                    let _ = tx_clone.send(format!("Transcription join error: {:?}", e));
+                    let _ =
+                        tx_clone.send(format!("Transcription join error: {:?}", e));
                 }
             }
         });
@@ -804,7 +986,7 @@ impl ChatApp {
 
     fn handle_file_upload(&mut self) {
         let allowed_extensions = [
-            "plaintext", "docx", "pdf", "rs", "toml", "png", "jpeg", "jpg", "webp", "gif",
+            "plaintext", "docx", "pdf", "rs", "toml", "txt", "md", "json", "py", "png", "jpeg", "jpg", "webp", "gif",
         ];
         if let Some(path) = FileDialog::new()
             .add_filter("Allowed files", &allowed_extensions)
@@ -819,12 +1001,13 @@ impl ChatApp {
                 .extension()
                 .map(|e| e.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
-            let header = format!("[Upload: {}]", filename);
+            let header = format!("[Upload: {}] ", filename);
             if allowed_extensions.contains(&ext.as_str()) {
                 if ["png", "jpeg", "jpg", "webp", "gif"].contains(&ext.as_str()) {
                     if let Ok(metadata) = path.metadata() {
                         if metadata.len() > 20 * 1024 * 1024 {
-                            self.input_text.push_str("[Error: Image file too large (>20MB)]");
+                            self.input_text
+                                .push_str("[Error: Image file too large (>20MB)]");
                             return;
                         }
                     }
@@ -832,25 +1015,46 @@ impl ChatApp {
                         Ok(img) => {
                             let resized = img.resize_exact(512, 512, FilterType::Lanczos3);
                             let mut buffer = Vec::new();
-                            if resized.write_to(&mut std::io::Cursor::new(&mut buffer), ImageOutputFormat::Png).is_ok() {
+                            if resized
+                                .write_to(
+                                    &mut std::io::Cursor::new(&mut buffer),
+                                    ImageOutputFormat::Png,
+                                )
+                                .is_ok()
+                            {
                                 let encoded = general_purpose::STANDARD.encode(&buffer);
                                 let data_url = format!("data:image/png;base64,{}", encoded);
                                 self.input_text.push_str(&header);
+                                let bubble_id = unique_id("attachment", &header);
+                                self.uploaded_images.insert(bubble_id, buffer.clone());
+                                self.selected_image_ids.push(bubble_id);
                                 self.chat_bubbles.push(ChatBubble {
                                     sender: Sender::User,
                                     content: header.clone(),
-                                    attachment_content: Some(data_url),
+                                    attachment_content: Some(data_url.clone()),
                                     is_thinking: false,
                                     is_code: false,
                                     language: None,
-                                    id: unique_id("attachment", &header),
+                                    id: bubble_id,
                                     timestamp: Some(Instant::now()),
                                     persistent: true,
                                 });
+                                let mut history = self.conversation_history.lock().unwrap();
+                                history.push(ConversationMessage {
+                                    role: "user".to_string(),
+                                    content: header.clone(),
+                                    id: format!("{:?}", bubble_id),
+                                    attachment_content: Some(data_url),
+                                });
+                                save_memory(&*history);
+                                self.history_dirty = true;
                             }
                         }
                         Err(e) => {
-                            self.input_text.push_str(&format!("[Error: Failed to open image file: {}]", e));
+                            self.input_text.push_str(&format!(
+                                "[Error: Failed to open image file: {}]",
+                                e
+                            ));
                         }
                     }
                 } else {
@@ -861,6 +1065,9 @@ impl ChatApp {
                                 Err(_) => general_purpose::STANDARD.encode(&bytes),
                             };
                             self.input_text.push_str(&header);
+                            let bubble_id = unique_id("attachment", &header);
+                            self.uploaded_documents.insert(bubble_id, (filename.clone(), full_text.clone()));
+                            self.selected_document_ids.push(bubble_id);
                             self.chat_bubbles.push(ChatBubble {
                                 sender: Sender::User,
                                 content: header.clone(),
@@ -868,13 +1075,17 @@ impl ChatApp {
                                 is_thinking: false,
                                 is_code: false,
                                 language: None,
-                                id: unique_id("attachment", &header),
+                                id: bubble_id,
                                 timestamp: Some(Instant::now()),
                                 persistent: true,
                             });
+                            self.history_dirty = true;
                         }
                         Err(e) => {
-                            self.input_text.push_str(&format!("[Error: Failed to read file: {}]", e));
+                            self.input_text.push_str(&format!(
+                                "[Error: Failed to read file: {}]",
+                                e
+                            ));
                         }
                     }
                 }
@@ -906,9 +1117,17 @@ impl ChatApp {
     fn clear_history(&mut self) {
         self.chat_bubbles.clear();
         self.code_layout_cache.clear();
+        self.uploaded_images.clear();
+        self.uploaded_documents.clear();
+        self.selected_image_ids.clear();
+        self.selected_document_ids.clear();
+        // === FIX: Clear conversation channels ===
+        self.conversation_channels.clear();
         let mut history = self.conversation_history.lock().unwrap();
         history.clear();
         save_memory(&*history);
+        self.history_dirty = false;
+        eprintln!("[HISTORY] Cleared all conversation history");
     }
 
     fn rebuild_conversation_history(&self) {
@@ -920,57 +1139,116 @@ impl ChatApp {
                     Sender::Model => "assistant",
                     Sender::System => "system",
                 };
-                let full_content = if let Some(ref attach) = bubble.attachment_content {
-                    if attach.starts_with("data:image") {
-                        json!([
-                            { "type": "input_text", "text": bubble.content },
-                            { "type": "input_image", "image_url": { "url": attach } }
-                        ])
-                    } else {
-                        json!(format!("{}{}", bubble.content, attach))
-                    }
-                } else {
-                    json!(bubble.content.clone())
-                };
-                new_history.push(json!({
-                    "role": role,
-                    "content": full_content,
-                    "id": format!("{:?}", bubble.id)
-                }));
+                new_history.push(ConversationMessage {
+                    role: role.to_string(),
+                    content: bubble.content.clone(),
+                    id: format!("{:?}", bubble.id),
+                    attachment_content: bubble.attachment_content.clone(),
+                });
             }
         }
         let mut history = self.conversation_history.lock().unwrap();
         *history = new_history;
-        save_memory(&*history);
+    }
+
+    fn mark_history_dirty(&mut self) {
+        self.history_dirty = true;
+    }
+
+    fn save_history_if_dirty(&mut self) {
+        if self.history_dirty {
+            self.rebuild_conversation_history();
+            save_memory(&*self.conversation_history.lock().unwrap());
+            self.history_dirty = false;
+        }
+    }
+
+    fn build_api_messages(&self) -> Vec<Value> {
+        let history = self.conversation_history.lock().unwrap();
+        let mut messages: Vec<Value> = history
+            .iter()
+            .map(|msg| {
+                json!({
+                    "role": if msg.role == "assistant" { "assistant" } else { "user" },
+                    "content": msg.content.clone()
+                })
+            })
+            .collect();
+        if !self.selected_image_ids.is_empty() || !self.selected_document_ids.is_empty() {
+            if let Some(last_msg) = messages.last_mut() {
+                let mut content_parts = Vec::new();
+                if let Some(text) = last_msg["content"].as_str() {
+                    content_parts.push(json!({
+                        "type": "text",
+                        "text": text
+                    }));
+                }
+                for image_id in &self.selected_image_ids {
+                    if let Some(image_bytes) = self.uploaded_images.get(image_id) {
+                        let encoded = general_purpose::STANDARD.encode(image_bytes);
+                        let data_url = format!("data:image/png;base64,{}", encoded);
+                        content_parts.push(json!({
+                            "type": "image_url",
+                            "image_url": { "url": data_url }
+                        }));
+                    }
+                }
+                for doc_id in &self.selected_document_ids {
+                    if let Some((filename, content)) = self.uploaded_documents.get(doc_id) {
+                        let doc_text = format!(
+                            "\n--- FILE: {} ---\n{}\n--- END FILE ---", filename, content);
+                        if let Some(text_part) = content_parts.last_mut() {
+                            if let Some(text) = text_part["text"].as_str() {
+                                text_part["text"] = json!(format!("{}{}", text, doc_text));
+                            }
+                        }
+                    }
+                }
+                if self.selected_image_ids.is_empty() {
+                    if let Some(text) = last_msg["content"].as_str() {
+                        let mut new_text = text.to_string();
+                        for doc_id in &self.selected_document_ids {
+                            if let Some((filename, content)) = self.uploaded_documents.get(doc_id) {
+                                new_text.push_str(&format!(
+                                    "\n--- FILE: {} ---\n{}\n--- END FILE ---", filename, content));
+                            }
+                        }
+                        last_msg["content"] = json!(new_text);
+                    }
+                } else {
+                    last_msg["content"] = json!(content_parts);
+                }
+            }
+        }
+        messages
     }
 
     fn process_input(&mut self) {
-        let trimmed = self.input_text.trim();
+        let trimmed = self.input_text.trim().to_string();
         if trimmed.is_empty() {
             return;
         }
         if let Some(edit_index) = self.editing_bubble.take() {
             let bubble = &mut self.chat_bubbles[edit_index];
-            bubble.content = trimmed.to_string();
+            bubble.content = trimmed.clone();
             {
                 let mut history = self.conversation_history.lock().unwrap();
                 for item in history.iter_mut() {
-                    if let Some(id_value) = item.get("id").and_then(|v| v.as_str()) {
-                        if id_value == format!("{:?}", bubble.id) {
-                            item["content"] = json!(trimmed);
-                            break;
-                        }
+                    if item.id == format!("{:?}", bubble.id) {
+                        item.content = trimmed.clone();
+                        break;
                     }
                 }
                 save_memory(&*history);
             }
             self.input_text.clear();
+            self.history_dirty = false;
             return;
         }
-        let bubble_id = unique_id("bubble", trimmed);
+        let bubble_id = unique_id("bubble", &trimmed);
         self.chat_bubbles.push(ChatBubble {
             sender: Sender::User,
-            content: trimmed.to_string(),
+            content: trimmed.clone(),
             attachment_content: None,
             is_thinking: false,
             is_code: false,
@@ -981,15 +1259,28 @@ impl ChatApp {
         });
         {
             let mut history = self.conversation_history.lock().unwrap();
-            history.push(json!({
-                "role": "user",
-                "content": trimmed,
-                "id": format!("{:?}", bubble_id)
-            }));
+            history.push(ConversationMessage {
+                role: "user".to_string(),
+                content: trimmed.clone(),
+                id: format!("{:?}", bubble_id),
+                attachment_content: None,
+            });
             save_memory(&*history);
         }
         self.input_text.clear();
         self.scroll_to_bottom = true;
+        self.history_dirty = false;
+        let images_were_selected = !self.selected_image_ids.is_empty();
+        let docs_were_selected = !self.selected_document_ids.is_empty();
+
+        // === FIX: Clean up old closed channels before creating new one ===
+        self.conversation_channels.retain(|ch| !ch.is_closed());
+
+        // === FIX: Enforce max 2 channels for LM Studio ===
+        if self.conversation_channels.len() >= MAX_CONVERSATION_CHANNELS {
+            self.conversation_channels.remove(0);
+        }
+
         let (tx, rx) = unbounded_channel();
         self.conversation_channels.push(rx);
         let client = self.client.clone();
@@ -1006,16 +1297,14 @@ impl ChatApp {
         let max_completion_tokens = self.max_completion_tokens;
         let experimental_reasoning = self.experimental_reasoning;
         let streaming_enabled = self.streaming_enabled;
+        let messages = self.build_api_messages();
         tokio::spawn(async move {
             if streaming_enabled {
                 call_model_streaming(
                     &client,
                     &api_url,
                     &model,
-                    {
-                        let history = history_arc.lock().unwrap();
-                        history.clone()
-                    },
+                    messages,
                     experimental_reasoning,
                     temperature,
                     top_p,
@@ -1034,10 +1323,7 @@ impl ChatApp {
                     &client,
                     &api_url,
                     &model,
-                    {
-                        let history = history_arc.lock().unwrap();
-                        history.clone()
-                    },
+                    messages,
                     experimental_reasoning,
                     temperature,
                     top_p,
@@ -1048,11 +1334,15 @@ impl ChatApp {
                 )
                 .await;
                 if experimental_reasoning {
-                    let re = regex::Regex::new(r"(?s)<think> (.*?)</think>").unwrap();
+                    let re = regex::Regex::new(r"(?s)<think>(.*?)</think>").unwrap();
                     if let Some(captures) = re.captures(&model_response.content) {
-                        let extracted_reasoning = captures.get(1).unwrap().as_str().trim().to_owned();
+                        let extracted_reasoning =
+                            captures.get(1).unwrap().as_str().trim().to_owned();
                         model_response.reasoning = Some(extracted_reasoning);
-                        model_response.content = re.replace(&model_response.content, "").trim().to_string();
+                        model_response.content = re
+                            .replace(&model_response.content, "")
+                            .trim()
+                            .to_string();
                     }
                 }
                 model_response.content = model_response.content.trim().to_string();
@@ -1068,16 +1358,25 @@ impl ChatApp {
                 {
                     let mut history = history_arc.lock().unwrap();
                     let bubble_id = unique_id("bubble", &model_response.content);
-                    history.push(json!({
-                        "role": "assistant",
-                        "content": model_response.content.clone(),
-                        "id": format!("{:?}", bubble_id)
-                    }));
+                    history.push(ConversationMessage {
+                        role: "assistant".to_string(),
+                        content: model_response.content.clone(),
+                        id: format!("{:?}", bubble_id),
+                        attachment_content: None,
+                    });
                     save_memory(&*history);
                 }
                 process_tts(&model_response.content, &tts_enabled, tts_stop_flag);
             }
         });
+        if images_were_selected {
+            self.selected_image_ids.clear();
+            self.history_dirty = true;
+        }
+        if docs_were_selected {
+            self.selected_document_ids.clear();
+            self.history_dirty = true;
+        }
     }
 
     fn update_top_panel(&mut self, ctx: &egui::Context) {
@@ -1092,6 +1391,19 @@ impl ChatApp {
                 if ui.button("Settings").clicked() {
                     self.show_settings = true;
                 }
+                if ui.button("Files").clicked() {
+                    self.show_image_selector = !self.show_image_selector;
+                }
+                let total_selected = self.selected_image_ids.len() + self.selected_document_ids.len();
+                if total_selected > 0 {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "📎 {} file(s) will be sent with next message",
+                            total_selected
+                        ))
+                        .color(egui::Color32::YELLOW)
+                    );
+                }
             });
         });
     }
@@ -1104,19 +1416,39 @@ impl ChatApp {
                     egui::vec2(ui.available_width(), separator_height),
                     egui::Sense::drag(),
                 );
-                ui.painter().rect_filled(drag_rect, 0.0, egui::Color32::DARK_GRAY);
+                ui.painter()
+                    .rect_filled(drag_rect, 0.0, egui::Color32::DARK_GRAY);
                 if drag_resp.dragged() {
-                    self.input_panel_height = (self.input_panel_height - drag_resp.drag_delta().y)
-                        .clamp(20.0, 300.0);
+                    self.input_panel_height =
+                        (self.input_panel_height - drag_resp.drag_delta().y)
+                            .clamp(20.0, 300.0);
                 }
                 ui.add_space(4.0);
+                if !self.selected_image_ids.is_empty() || !self.selected_document_ids.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "📎 {} image(s), {} document(s) selected",
+                                self.selected_image_ids.len(),
+                                self.selected_document_ids.len()
+                            ))
+                            .color(egui::Color32::YELLOW)
+                        );
+                        if ui.button("Clear Selection").clicked() {
+                            self.selected_image_ids.clear();
+                            self.selected_document_ids.clear();
+                        }
+                    });
+                }
                 ui.horizontal(|ui| {
                     let spacing = ui.spacing().item_spacing.x;
                     let send_button_width = 60.0;
                     let text_field_width =
                         (ui.available_width() - send_button_width - spacing).max(0.0);
-                    let size = egui::Vec2::new(text_field_width, self.input_panel_height);
-                    let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::click());
+                    let size =
+                        egui::Vec2::new(text_field_width, self.input_panel_height);
+                    let (rect, _response) =
+                        ui.allocate_exact_size(size, egui::Sense::click());
                     ui.put(rect, |ui: &mut egui::Ui| {
                         egui::ScrollArea::vertical()
                             .id_salt("unique_input_text_scroll")
@@ -1130,14 +1462,23 @@ impl ChatApp {
                             })
                             .inner
                     });
-                    if ui.button(if self.editing_bubble.is_some() { "Save" } else { "Send" }).clicked()
-                        || ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift)
+                    if ui
+                        .button(if self.editing_bubble.is_some() {
+                            "Save"
+                        } else {
+                            "Send"
+                        })
+                        .clicked()
+                        || ui.input(|i| {
+                            i.key_pressed(egui::Key::Enter) && !i.modifiers.shift
+                        })
                     {
                         self.process_input();
                     }
                 });
                 ui.horizontal(|ui| {
-                    let stt_btn_text = if self.stt_recording { "Stop" } else { "STT" };
+                    let stt_btn_text =
+                        if self.stt_recording { "Stop" } else { "STT" };
                     if ui.button(stt_btn_text).clicked() {
                         if self.stt_recording {
                             self.stop_stt_recording_and_transcribe_heavy();
@@ -1153,6 +1494,128 @@ impl ChatApp {
                 });
             });
         });
+    }
+
+    fn update_image_selector(&mut self, ctx: &egui::Context) {
+        if self.show_image_selector {
+            let image_info: Vec<(egui::Id, bool, String)> = self.uploaded_images
+                .iter()
+                .map(|(id, _)| {
+                    let is_selected = self.selected_image_ids.contains(id);
+                    let id_str = format!("{:?}", id);
+                    let display_num = id_str
+                        .trim_start_matches("attachment-")
+                        .split('-')
+                        .next()
+                        .unwrap_or("?")
+                        .to_string();
+                    (*id, is_selected, format!("🖼️ Image {}", display_num))
+                })
+                .collect();
+            let doc_info: Vec<(egui::Id, bool, String)> = self.uploaded_documents
+                .iter()
+                .map(|(id, (filename, _))| {
+                    let is_selected = self.selected_document_ids.contains(id);
+                    (*id, is_selected, format!("📄 {}", filename))
+                })
+                .collect();
+            egui::Window::new("Uploaded Files")
+                .open(&mut self.show_image_selector)
+                .resizable(true)
+                .default_size([400.0, 500.0])
+                .show(ctx, |ui| {
+                    ui.label("Select files to include with your next message:");
+                    ui.separator();
+                    if image_info.is_empty() && doc_info.is_empty() {
+                        ui.label("No files uploaded yet. Click 'Upload' to add files.");
+                    } else {
+                        let mut ids_to_remove: Vec<egui::Id> = Vec::new();
+                        if !image_info.is_empty() {
+                            ui.label(egui::RichText::new("Images:").strong());
+                            egui::ScrollArea::vertical()
+                                .id_salt("images_scroll")
+                                .max_height(150.0)
+                                .show(ui, |ui| {
+                                    ui.vertical(|ui| {
+                                        for (image_id, is_selected, display_name) in &image_info {
+                                            ui.horizontal(|ui| {
+                                                let mut checked = *is_selected;
+                                                if ui.checkbox(&mut checked, display_name).changed() {
+                                                    if checked {
+                                                        if !self.selected_image_ids.contains(image_id) {
+                                                            self.selected_image_ids.push(*image_id);
+                                                        }
+                                                    } else {
+                                                        self.selected_image_ids.retain(|id| id != image_id);
+                                                    }
+                                                }
+                                                if ui.button("🗑️").clicked() {
+                                                    ids_to_remove.push(*image_id);
+                                                }
+                                            });
+                                        }
+                                    });
+                                });
+                            ui.separator();
+                        }
+                        if !doc_info.is_empty() {
+                            ui.label(egui::RichText::new("Documents:").strong());
+                            egui::ScrollArea::vertical()
+                                .id_salt("docs_scroll")
+                                .max_height(150.0)
+                                .show(ui, |ui| {
+                                    ui.vertical(|ui| {
+                                        for (doc_id, is_selected, display_name) in &doc_info {
+                                            ui.horizontal(|ui| {
+                                                let mut checked = *is_selected;
+                                                if ui.checkbox(&mut checked, display_name).changed() {
+                                                    if checked {
+                                                        if !self.selected_document_ids.contains(doc_id) {
+                                                            self.selected_document_ids.push(*doc_id);
+                                                        }
+                                                    } else {
+                                                        self.selected_document_ids.retain(|id| id != doc_id);
+                                                    }
+                                                }
+                                                if ui.button("🗑️").clicked() {
+                                                    ids_to_remove.push(*doc_id);
+                                                }
+                                            });
+                                        }
+                                    });
+                                });
+                        }
+                        if !ids_to_remove.is_empty() {
+                            for id in &ids_to_remove {
+                                self.uploaded_images.remove(id);
+                                self.uploaded_documents.remove(id);
+                                self.selected_image_ids.retain(|i| i != id);
+                                self.selected_document_ids.retain(|i| i != id);
+                                self.chat_bubbles.retain(|b| b.id != *id);
+                                // === FIX: Clear cache for removed bubble ===
+                                self.code_layout_cache.remove(id);
+                            }
+                            self.history_dirty = true;
+                        }
+                    }
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if ui.button("Select All").clicked() {
+                            self.selected_image_ids = self.uploaded_images.keys().cloned().collect();
+                            self.selected_document_ids = self.uploaded_documents.keys().cloned().collect();
+                        }
+                        if ui.button("Clear All").clicked() {
+                            self.selected_image_ids.clear();
+                            self.selected_document_ids.clear();
+                        }
+                    });
+                    ui.label(format!(
+                        "{} image(s), {} document(s) selected for next message",
+                        self.selected_image_ids.len(),
+                        self.selected_document_ids.len()
+                    ));
+                });
+        }
     }
 
     fn update_settings_window(&mut self, ctx: &egui::Context) {
@@ -1183,7 +1646,10 @@ impl ChatApp {
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.label("Temp:");
-                        if ui.add(egui::Slider::new(&mut temperature, 0.0..=2.0)).changed() {
+                        if ui
+                            .add(egui::Slider::new(&mut temperature, 0.0..=2.0))
+                            .changed()
+                        {
                             changed = true;
                         }
                         if ui.button("Reset").clicked() {
@@ -1213,7 +1679,10 @@ impl ChatApp {
                     });
                     ui.horizontal(|ui| {
                         ui.label("Repeat Penalty:");
-                        if ui.add(egui::Slider::new(&mut repeat_penalty, 0.5..=2.0)).changed() {
+                        if ui
+                            .add(egui::Slider::new(&mut repeat_penalty, 0.5..=2.0))
+                            .changed()
+                        {
                             changed = true;
                         }
                         if ui.button("Reset").clicked() {
@@ -1233,19 +1702,32 @@ impl ChatApp {
                     });
                     ui.horizontal(|ui| {
                         ui.label("Max Tokens:");
-                        if ui.add(egui::Slider::new(&mut max_completion_tokens, 10..=10024)).changed() {
+                        if ui
+                            .add(egui::Slider::new(
+                                &mut max_completion_tokens,
+                                10..=10024,
+                            ))
+                            .changed()
+                        {
                             changed = true;
                         }
                         if ui.button("Reset").clicked() {
-                            max_completion_tokens = self.default_settings.max_completion_tokens;
+                            max_completion_tokens =
+                                self.default_settings.max_completion_tokens;
                             changed = true;
                         }
                     });
                     ui.separator();
-                    if ui.checkbox(&mut tts_enabled_val, "Enable TTS").changed() {
+                    if ui
+                        .checkbox(&mut tts_enabled_val, "Enable TTS")
+                        .changed()
+                    {
                         changed = true;
                     }
-                    if ui.checkbox(&mut streaming_enabled_val, "Enable Streaming").changed() {
+                    if ui
+                        .checkbox(&mut streaming_enabled_val, "Enable Streaming")
+                        .changed()
+                    {
                         changed = true;
                     }
                     if ui.checkbox(&mut send_stt_val, "Send STT").changed() {
@@ -1257,8 +1739,16 @@ impl ChatApp {
                         .selected_text(&selected_voice)
                         .show_ui(ui, |ui| {
                             for voice_filename in AVAILABLE_VOICES {
-                                let display_name = voice_filename.trim_end_matches(".bin");
-                                if ui.selectable_value(&mut selected_voice, voice_filename.to_string(), display_name).changed() {
+                                let display_name =
+                                    voice_filename.trim_end_matches(".bin");
+                                if ui
+                                    .selectable_value(
+                                        &mut selected_voice,
+                                        voice_filename.to_string(),
+                                        display_name,
+                                    )
+                                    .changed()
+                                {
                                     changed = true;
                                 }
                             }
@@ -1270,7 +1760,14 @@ impl ChatApp {
                             .selected_text(selected_model.as_str())
                             .show_ui(ui, |ui| {
                                 for model in &self.model_list {
-                                    if ui.selectable_value(&mut selected_model, model.clone(), model).changed() {
+                                    if ui
+                                        .selectable_value(
+                                            &mut selected_model,
+                                            model.clone(),
+                                            model,
+                                        )
+                                        .changed()
+                                    {
                                         changed = true;
                                     }
                                 }
@@ -1316,7 +1813,11 @@ impl ChatApp {
                             }
                         }
                         if ui.button("-").clicked() {
-                            if let Some(pos) = self.model_list.iter().position(|m| m == &selected_model) {
+                            if let Some(pos) = self
+                                .model_list
+                                .iter()
+                                .position(|m| m == &selected_model)
+                            {
                                 self.model_list.remove(pos);
                                 selected_model = if !self.model_list.is_empty() {
                                     self.model_list[0].clone()
@@ -1336,7 +1837,8 @@ impl ChatApp {
                 self.repeat_penalty = repeat_penalty;
                 self.top_k = top_k;
                 self.max_completion_tokens = max_completion_tokens;
-                self.tts_enabled.store(tts_enabled_val, Ordering::Relaxed);
+                self.tts_enabled
+                    .store(tts_enabled_val, Ordering::Relaxed);
                 self.streaming_enabled = streaming_enabled_val;
                 self.send_stt = send_stt_val;
                 self.selected_model = selected_model;
@@ -1379,33 +1881,69 @@ impl ChatApp {
         });
     }
 
+    // === FIX: Properly manage conversation channels to prevent memory leaks ===
     fn process_conversation_channels(&mut self) {
-        self.conversation_channels.retain_mut(|channel| {
+        let mut history_changed = false;
+        let mut closed_channel_indices = Vec::new();
+
+        // Process all channels and identify closed ones
+        for (idx, channel) in self.conversation_channels.iter_mut().enumerate() {
             while let Ok(message) = channel.try_recv() {
                 match message {
                     BubbleMessage::New(bubble) => {
                         self.chat_bubbles.push(bubble);
                         self.scroll_to_bottom = true;
+                        history_changed = true;
                     }
                     BubbleMessage::Update { id, content } => {
-                        if let Some(existing) = self.chat_bubbles.iter_mut().find(|b| b.id == id) {
+                        if let Some(existing) =
+                            self.chat_bubbles.iter_mut().find(|b| b.id == id)
+                        {
                             existing.content = content;
                         }
                         self.scroll_to_bottom = true;
                     }
                     BubbleMessage::Remove(id) => {
                         self.chat_bubbles.retain(|b| b.id != id);
+                        // === FIX: Clear cache for removed bubble ===
+                        self.code_layout_cache.remove(&id);
                         self.scroll_to_bottom = true;
+                        history_changed = true;
                     }
                 }
             }
-            !channel.is_closed()
-        });
+
+            // === FIX: Mark closed channels for removal ===
+            if channel.is_closed() {
+                closed_channel_indices.push(idx);
+            }
+        }
+
+        // === FIX: Remove closed channels in reverse order ===
+        for idx in closed_channel_indices.into_iter().rev() {
+            self.conversation_channels.remove(idx);
+        }
+
+        // === FIX: Limit channels to max 2 (one active, one completing) ===
+        if self.conversation_channels.len() > MAX_CONVERSATION_CHANNELS {
+            self.conversation_channels.drain(0..self.conversation_channels.len() - MAX_CONVERSATION_CHANNELS);
+        }
+
+        if history_changed {
+            self.mark_history_dirty();
+        }
     }
 
     fn update_app(&mut self, ctx: &egui::Context) {
-        // Handle hotkey commands first
-        while let Ok(command) = self.hotkey_rx.try_recv() {
+        // === FIX: Collect commands first, then process (avoids borrow conflict) ===
+        let mut hotkey_commands = Vec::new();
+        if let Some(ref hotkey_res) = self.hotkey_resources {
+            while let Ok(command) = hotkey_res.try_recv() {
+                hotkey_commands.push(command);
+            }
+        }
+        // Now process commands after borrow ends
+        for command in hotkey_commands {
             match command {
                 HotkeyCommand::ToggleSTT => {
                     if self.stt_recording {
@@ -1419,7 +1957,6 @@ impl ChatApp {
             }
         }
 
-        // Process transcription results
         while let Ok(new_text) = self.transcription_rx.try_recv() {
             if self.send_stt && !new_text.trim().is_empty() {
                 self.input_text = new_text;
@@ -1429,37 +1966,30 @@ impl ChatApp {
                 self.input_text = new_text;
             }
         }
-
-        // Clean up system messages
         self.chat_bubbles.retain(|bubble| {
             if bubble.sender == Sender::System {
-                bubble.timestamp.map(|ts| ts.elapsed() < Duration::from_secs(1)).unwrap_or(true)
+                bubble
+                    .timestamp
+                    .map(|ts| ts.elapsed() < Duration::from_secs(1))
+                    .unwrap_or(true)
             } else {
                 true
             }
         });
-
-        // Update UI components
         self.update_top_panel(ctx);
         self.update_input_panel(ctx);
         self.update_settings_window(ctx);
+        self.update_image_selector(ctx);
         self.update_chat_area(ctx);
         self.process_conversation_channels();
-        self.rebuild_conversation_history();
-
-        // Force repaints even when the app is in background
         if self.background_repaint_timer.elapsed() > Duration::from_millis(100) {
             ctx.request_repaint();
             self.background_repaint_timer = Instant::now();
         }
-
-        // Additional force repaint counter for background operation
         self.force_repaint_counter = self.force_repaint_counter.wrapping_add(1);
         if self.force_repaint_counter % 5 == 0 {
             ctx.request_repaint();
         }
-
-        // Normal repaint conditions
         if self.last_repaint.elapsed() > Duration::from_millis(16)
             || self.scroll_to_bottom
             || !self.conversation_channels.is_empty()
@@ -1470,7 +2000,13 @@ impl ChatApp {
         }
     }
 }
-fn render_chat_bubble(ui: &mut egui::Ui, bubble: &ChatBubble, index: usize, app: &mut ChatApp) {
+
+fn render_chat_bubble(
+    ui: &mut egui::Ui,
+    bubble: &ChatBubble,
+    index: usize,
+    app: &mut ChatApp,
+) {
     let bubble_color = match bubble.sender {
         Sender::User => egui::Color32::from_rgb(53, 51, 54),
         Sender::Model => egui::Color32::from_rgb(18, 107, 166),
@@ -1491,11 +2027,13 @@ fn render_chat_bubble(ui: &mut egui::Ui, bubble: &ChatBubble, index: usize, app:
     .show(ui, |ui| {
         ui.set_max_width(ui.available_width() * 0.7);
         if bubble.is_code {
-            render_collapsible_bubble(ui, "Code:", bubble.id, |ui| {
+            render_collapsible_bubble(ui, "Code: ", bubble.id, |ui| {
                 let layout = app
                     .code_layout_cache
                     .entry(bubble.id)
-                    .or_insert_with(|| highlight_code_job(&bubble.content, bubble.language.as_deref()))
+                    .or_insert_with(|| {
+                        highlight_code_job(&bubble.content, bubble.language.as_deref())
+                    })
                     .clone();
                 ui.label(layout);
                 if ui.button("Copy Code").clicked() {
@@ -1505,59 +2043,117 @@ fn render_chat_bubble(ui: &mut egui::Ui, bubble: &ChatBubble, index: usize, app:
                 }
             });
         } else if bubble.is_thinking {
-            render_collapsible_bubble(ui, "Reasoning:", bubble.id, |ui| {
+            render_collapsible_bubble(ui, "Reasoning: ", bubble.id, |ui| {
                 render_markdown(ui, &bubble.content);
             });
         } else {
-            ui.label(egui::RichText::new(&bubble.content).color(egui::Color32::WHITE));
+            ui.label(
+                egui::RichText::new(&bubble.content).color(egui::Color32::WHITE),
+            );
+            if let Some(attach) = &bubble.attachment_content {
+                if attach.starts_with("image") {
+                    if let Some(image_bytes) = app.uploaded_images.get(&bubble.id) {
+                        ui.add(
+                            egui::Image::from_bytes(
+                                format!("image-{:?}", bubble.id),
+                                image_bytes.clone(),
+                            )
+                            .max_width(200.0)
+                            .fit_to_original_size(1.0),
+                        );
+                    } else if let Some(comma_pos) = attach.find(',') {
+                        if comma_pos < attach.len() {
+                            let base64_data = &attach[comma_pos + 1..];
+                            if let Ok(image_bytes) = general_purpose::STANDARD.decode(base64_data) {
+                                ui.add(
+                                    egui::Image::from_bytes(
+                                        format!("image-{:?}", bubble.id),
+                                        image_bytes,
+                                    )
+                                    .max_width(200.0)
+                                    .fit_to_original_size(1.0),
+                                );
+                            }
+                        }
+                    }
+                } else if !attach.starts_with("[Upload:") {
+                    render_collapsible_bubble(ui, "📄 Document: ", bubble.id, |ui| {
+                        ui.add(egui::Label::new(attach).wrap());
+                    });
+                }
+            }
         }
         ui.horizontal(|ui| {
-            if ui.add_sized([40.0, 20.0], egui::Button::new("Edit")).clicked() {
+            if ui
+                .add_sized([40.0, 20.0], egui::Button::new("Edit"))
+                .clicked()
+            {
                 app.input_text = bubble.content.clone();
                 app.editing_bubble = Some(index);
             }
-            if ui.add_sized([50.0, 20.0], egui::Button::new("Delete")).clicked() {
+            if ui
+                .add_sized([50.0, 20.0], egui::Button::new("Delete"))
+                .clicked()
+            {
+                // === FIX: Clear cache for this specific bubble only ===
+                app.code_layout_cache.remove(&bubble.id);
+
+                if let Some(attach) = &bubble.attachment_content {
+                    if attach.starts_with("image") {
+                        app.uploaded_images.remove(&bubble.id);
+                        app.selected_image_ids.retain(|id| id != &bubble.id);
+                    } else if !attach.starts_with("[Upload:") {
+                        app.uploaded_documents.remove(&bubble.id);
+                        app.selected_document_ids.retain(|id| id != &bubble.id);
+                    }
+                }
                 app.chat_bubbles.remove(index);
                 app.rebuild_conversation_history();
+                {
+                    let history = app.conversation_history.lock().unwrap();
+                    save_memory(&*history);
+                }
+                app.history_dirty = false;
+                // === FIX: Don't clear entire cache, just this bubble (done above) ===
             }
         });
     });
 }
+
 impl eframe::App for ChatApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_app(ctx);
-
-        // CRITICAL: Force repaints even when app is in background
         ctx.request_repaint_after(Duration::from_millis(100));
     }
-
+    // === CRITICAL FIX: Proper shutdown order to prevent panic ===
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        // Set shutdown flag
-        self.shutting_down = true;
-
-        // First, stop any active TTS
+        // 1. Stop TTS first
         self.tts_stop_flag.store(true, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(200));
 
-        // Stop STT if it's active
+        // 2. Stop STT recording if active
         if self.stt_active.load(Ordering::Relaxed) {
             self.stop_stt_recording();
         }
 
-        // Properly shut down the hotkey manager
-        if let Some(handle) = self.hotkey_interrupt_handle.take() {
-            handle.interrupt();
-
-            // Give the hotkey manager time to shut down
-            std::thread::sleep(Duration::from_millis(100));
+        // 3. === CRITICAL: Shutdown hotkey resources BEFORE struct drops ===
+        if let Some(ref mut resources) = self.hotkey_resources {
+            resources.shutdown();
         }
+        self.hotkey_resources = None;
 
-        // Save settings one last time
+        // 4. === FIX: Clear conversation channels ===
+        self.conversation_channels.clear();
+
+        // 5. Final cleanup
+        std::thread::sleep(Duration::from_millis(100));
+
         self.save_settings();
-
-        // Save memory one last time
-        save_memory(&*self.conversation_history.lock().unwrap());
+        self.save_history_if_dirty();
+        eprintln!("[EXIT] Saved conversation history on exit");
     }
 }
+
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let native_options = eframe::NativeOptions {
@@ -1570,5 +2166,12 @@ async fn main() {
         ..Default::default()
     };
     let chat_app = ChatApp::new();
-    let _ = eframe::run_native("AI Chat", native_options, Box::new(|_cc| Ok(Box::new(chat_app))));
+    let _ = eframe::run_native(
+        "AI Chat",
+        native_options,
+        Box::new(|cc| {
+            egui_extras::install_image_loaders(&cc.egui_ctx);
+            Ok(Box::new(chat_app))
+        }),
+    );
 }
